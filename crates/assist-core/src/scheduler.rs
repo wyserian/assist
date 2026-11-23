@@ -9,8 +9,6 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::SystemTime;
-
 use tokio::sync::{broadcast, mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
 
@@ -19,8 +17,10 @@ use crate::audit::{now_ms, Audit, AuditRecord};
 use crate::config::Config;
 use crate::dialog::{CommandInfo, Plan};
 use crate::policy::Principal;
+use crate::store::Store;
+use assist_proto::JobSummary;
 
-/// Job number, unique per daemon run.
+/// Job number; unique across restarts when a [`Store`] is used.
 pub type JobId = u64;
 
 /// Finished jobs kept for `jobs` and `log`; older ones are dropped (the audit log keeps them).
@@ -46,14 +46,41 @@ pub struct JobInfo {
     pub lane: Lane,
     /// Current state.
     pub state: JobState,
-    /// When it was submitted.
-    pub created: SystemTime,
-    /// When it started running.
-    pub started: Option<SystemTime>,
-    /// When it ended.
-    pub finished: Option<SystemTime>,
+    /// When it was submitted, Unix ms.
+    pub created: u64,
+    /// When it started running, Unix ms.
+    pub started: Option<u64>,
+    /// When it ended, Unix ms.
+    pub finished: Option<u64>,
     /// Why it failed.
     pub error: Option<ActionError>,
+}
+
+impl JobInfo {
+    /// The job as sent to clients.
+    pub fn summary(&self) -> JobSummary {
+        JobSummary {
+            id: self.id,
+            command: self.command.clone(),
+            title: self.title.clone(),
+            source: self.principal.source.clone(),
+            lane: self.lane,
+            state: self.state,
+            created: self.created,
+            started: self.started,
+            finished: self.finished,
+            error: self.error.as_ref().map(|e| e.message.clone()),
+        }
+    }
+}
+
+/// Where job history goes; both are optional (tests and the offline shell can skip them).
+#[derive(Debug, Clone, Default)]
+pub struct Persistence {
+    /// Hash-chained audit log of every state change.
+    pub audit: Option<Audit>,
+    /// Job history and full output logs.
+    pub store: Option<Store>,
 }
 
 /// Something that happened to a job.
@@ -97,6 +124,7 @@ struct Inner {
     next_id: AtomicU64,
     events: broadcast::Sender<JobEvent>,
     audit: Option<Audit>,
+    store: Option<Store>,
 }
 
 struct Slot {
@@ -108,8 +136,14 @@ struct Slot {
 }
 
 impl Scheduler {
-    /// A scheduler for `actions`; `audit` records every state change.
-    pub fn new(actions: Vec<Arc<dyn Action>>, config: Arc<Config>, audit: Option<Audit>) -> Self {
+    /// A scheduler for `actions`, recording jobs to `persistence`. Job ids continue after the
+    /// store's last job.
+    pub fn new(
+        actions: Vec<Arc<dyn Action>>,
+        config: Arc<Config>,
+        persistence: Persistence,
+    ) -> Self {
+        let next_id = persistence.store.as_ref().map_or(1, Store::next_id);
         let lanes = BTreeMap::from([
             (
                 Lane::Interactive,
@@ -130,9 +164,10 @@ impl Scheduler {
                 config,
                 lanes,
                 jobs: Mutex::new(BTreeMap::new()),
-                next_id: AtomicU64::new(1),
+                next_id: AtomicU64::new(next_id),
                 events: broadcast::channel(EVENT_BUFFER).0,
-                audit,
+                audit: persistence.audit,
+                store: persistence.store,
             }),
         }
     }
@@ -177,11 +212,14 @@ impl Scheduler {
             principal: principal.clone(),
             lane,
             state: JobState::Queued,
-            created: SystemTime::now(),
+            created: now_ms(),
             started: None,
             finished: None,
             error: None,
         };
+        if let Some(store) = &inner.store {
+            store.insert(&info);
+        }
         inner.jobs().insert(
             id,
             Slot {
@@ -285,7 +323,7 @@ async fn run_job(inner: Arc<Inner>, action: Arc<dyn Action>, ctx: JobCtx, lane: 
     };
     inner.update(id, |info| {
         info.state = JobState::Running;
-        info.started = Some(SystemTime::now());
+        info.started = Some(now_ms());
     });
     inner.audit(id, "running");
     inner.emit(JobEvent::State {
@@ -330,6 +368,9 @@ impl Inner {
     fn update(&self, id: JobId, change: impl FnOnce(&mut JobInfo)) {
         if let Some(slot) = self.jobs().get_mut(&id) {
             change(&mut slot.info);
+            if let Some(store) = &self.store {
+                store.update(&slot.info);
+            }
         }
     }
 
@@ -345,6 +386,9 @@ impl Inner {
             Chunk::Cwd(_) => None,
         };
         if let Some(line) = line {
+            if let Some(store) = &self.store {
+                store.output(id, &line);
+            }
             let cap = self.config.jobs.output_tail_kb * 1024;
             if let Some(slot) = self.jobs().get_mut(&id) {
                 slot.tail_bytes += line.len();
@@ -364,7 +408,7 @@ impl Inner {
         let message = error.as_ref().map(|e| e.message.clone());
         self.update(id, |info| {
             info.state = state;
-            info.finished = Some(SystemTime::now());
+            info.finished = Some(now_ms());
             info.error = error;
         });
         self.audit_with(id, state.as_str(), message);
@@ -480,7 +524,11 @@ mod tests {
             Fake::action("fail", Behavior::Fail),
             Fake::action("wait", Behavior::Wait),
         ];
-        Scheduler::new(actions, Arc::new(Config::from_toml(config).unwrap()), None)
+        Scheduler::new(
+            actions,
+            Arc::new(Config::from_toml(config).unwrap()),
+            Persistence::default(),
+        )
     }
 
     fn submit(scheduler: &Scheduler, command: &str) -> JobId {
@@ -617,7 +665,10 @@ mod tests {
         let s = Scheduler::new(
             vec![Fake::action("echo", Behavior::Echo)],
             config,
-            Some(audit),
+            Persistence {
+                audit: Some(audit),
+                store: None,
+            },
         );
         let mut events = s.subscribe();
         let id = submit(&s, "echo");

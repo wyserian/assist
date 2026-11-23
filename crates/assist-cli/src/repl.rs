@@ -10,17 +10,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use assist_core::action::Chunk;
-use assist_core::audit::Audit;
-use assist_core::config::Config;
 use assist_core::dialog::{Dialog, Engine};
-use assist_core::phrases::PhraseSet;
 use assist_core::policy::Principal;
 use assist_core::scheduler::{JobEvent, JobId, JobState, Scheduler};
-use directories::ProjectDirs;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::broadcast::{self, error::RecvError};
+
+use crate::setup::{Assistant, Paths};
 
 const HELP: &str = "\
 Say what you want, for example: open firefox, run build, search rust tokio.
@@ -34,34 +32,6 @@ Say what you want, for example: open firefox, run build, search rust tokio.
 
 /// Longer input lines are rejected instead of buffered.
 const MAX_INPUT: usize = 8 * 1024;
-
-/// Where config and data live.
-pub struct Paths {
-    config: PathBuf,
-    data: PathBuf,
-}
-
-impl Paths {
-    /// Explicit paths, or the user's config and data directories.
-    pub fn resolve(config: Option<PathBuf>, data: Option<PathBuf>) -> Result<Self> {
-        let dirs = ProjectDirs::from("", "", "assist");
-        let config = match config {
-            Some(path) => path,
-            None => dirs
-                .as_ref()
-                .map(|d| d.config_dir().join("config.toml"))
-                .context("no user config directory; pass --config")?,
-        };
-        let data = match data {
-            Some(path) => path,
-            None => dirs
-                .as_ref()
-                .map(|d| d.data_dir().to_owned())
-                .context("no user data directory; pass --data-dir")?,
-        };
-        Ok(Self { config, data })
-    }
-}
 
 struct Repl {
     scheduler: Scheduler,
@@ -78,36 +48,12 @@ enum Flow {
 
 /// Runs the shell until input ends, `exit` or Ctrl+C.
 pub async fn run(paths: Paths) -> Result<()> {
-    let config = if paths.config.exists() {
-        Config::load(&paths.config).with_context(|| format!("config {}", paths.config.display()))?
-    } else {
-        println!(
-            "No config at {}; starting empty (see config/config.example.toml).",
-            paths.config.display()
-        );
-        Config::from_toml("")?
-    };
-    let config = Arc::new(config);
-    let audit_dir = paths.data.join("audit");
-    let audit =
-        Audit::open(&audit_dir).with_context(|| format!("audit log {}", audit_dir.display()))?;
-    let scheduler = Scheduler::new(
-        assist_actions::builtin(),
-        Arc::clone(&config),
-        Some(audit.clone()),
-    );
-    let phrases = PhraseSet::default_en()?;
-    let engine = Arc::new(Engine::new(
-        Arc::clone(&config),
-        &phrases,
-        scheduler.commands(),
-        true,
-    )?);
+    let assistant = Assistant::start(&paths)?;
     let owner = Principal::local("cli");
     let mut repl = Repl {
-        dialog: Dialog::new(Arc::clone(&engine), owner.clone()),
-        scheduler,
-        engine,
+        dialog: Dialog::new(Arc::clone(&assistant.engine), owner.clone()),
+        scheduler: assistant.scheduler.clone(),
+        engine: Arc::clone(&assistant.engine),
         owner,
         cwd: std::env::current_dir()?,
     };
@@ -147,9 +93,7 @@ pub async fn run(paths: Paths) -> Result<()> {
         }
     }
     repl.wait_for_jobs(&mut events).await;
-    if let Some(err) = audit.last_error() {
-        eprintln!("audit log error: {err}");
-    }
+    assistant.shutdown().await;
     Ok(())
 }
 
@@ -226,7 +170,9 @@ impl Repl {
                     println!("[#{id}] failed{reason}");
                 }
                 JobState::Cancelled => println!("[#{id}] stopped"),
-                JobState::Done | JobState::TimedOut => println!("[#{id}] {}", state.as_str()),
+                JobState::Done | JobState::TimedOut | JobState::Interrupted => {
+                    println!("[#{id}] {}", state.as_str())
+                }
             },
         }
     }

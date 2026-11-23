@@ -22,6 +22,16 @@ dad = "+910000000001"
 ask.text = "What should the message say?"   # overrides the phrase file's question
 risky = true
 
+[lanes]
+interactive = 2
+background = 3
+
+[jobs]
+timeout = "10m"
+output_tail_kb = 64
+retention_days = 7
+log_cap_mb = 500
+
 [search]
 url = "https://duckduckgo.com/?q={query}"
 

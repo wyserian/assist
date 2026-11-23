@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod repl;
+mod setup;
 
 /// Offline-first personal automation and voice assistant.
 #[derive(Parser)]
@@ -29,7 +30,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let paths = repl::Paths::resolve(cli.config, cli.data_dir)?;
+    let paths = setup::Paths::resolve(cli.config, cli.data_dir)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()

@@ -18,6 +18,8 @@ pub enum JobState {
     Cancelled,
     /// Stopped after `[jobs] timeout`.
     TimedOut,
+    /// Was queued or running when the daemon stopped.
+    Interrupted,
 }
 
 impl JobState {
@@ -35,6 +37,7 @@ impl JobState {
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
             Self::TimedOut => "timed_out",
+            Self::Interrupted => "interrupted",
         }
     }
 }
@@ -72,6 +75,7 @@ mod tests {
             JobState::Failed,
             JobState::Cancelled,
             JobState::TimedOut,
+            JobState::Interrupted,
         ] {
             let json = serde_json::to_string(&state).unwrap();
             assert_eq!(json, format!("\"{}\"", state.as_str()));

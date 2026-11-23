@@ -92,8 +92,12 @@ pub struct JobsConfig {
     /// A running job is stopped after this long, e.g. `"10m"`.
     #[serde(deserialize_with = "duration")]
     pub timeout: Duration,
-    /// Output kept per job for `jobs` listings; older lines are dropped.
+    /// Output kept in memory per job for `jobs` listings; older lines are dropped.
     pub output_tail_kb: usize,
+    /// Finished jobs and their logs are deleted after this many days.
+    pub retention_days: u64,
+    /// The oldest job logs are deleted while all logs together exceed this size.
+    pub log_cap_mb: u64,
 }
 
 impl Default for JobsConfig {
@@ -101,6 +105,8 @@ impl Default for JobsConfig {
         Self {
             timeout: Duration::from_secs(600),
             output_tail_kb: 64,
+            retention_days: 7,
+            log_cap_mb: 500,
         }
     }
 }
