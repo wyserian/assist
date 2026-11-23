@@ -22,6 +22,12 @@ confidence-threshold = 0.9
 # The list is for future deps too; don't warn while a license is not used yet.
 unused-allowed-license = "allow"
 
+# MPL-2.0 is file-level copyleft (only changes to its own files must be shared), not GPL.
+# Allowed per crate so every new MPL dependency still gets a review.
+[[licenses.exceptions]]
+crate = "option-ext" # via directories -> dirs-sys
+allow = ["MPL-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

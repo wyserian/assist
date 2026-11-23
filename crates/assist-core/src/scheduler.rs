@@ -50,7 +50,8 @@ impl JobState {
         !matches!(self, Self::Queued | Self::Running)
     }
 
-    fn name(self) -> &'static str {
+    /// Lowercase name, as used in the audit log and `jobs` listings.
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
@@ -381,7 +382,7 @@ impl Inner {
             info.finished = Some(SystemTime::now());
             info.error = error;
         });
-        self.audit_with(id, state.name(), message);
+        self.audit_with(id, state.as_str(), message);
         self.emit(JobEvent::State { id, state });
     }
 

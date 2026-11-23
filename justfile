@@ -9,6 +9,10 @@ test:
     cargo nextest run --workspace
     cargo test --workspace --doc
 
+# interactive assist shell (Phase 1a); pass e.g. `--config config/config.example.toml`
+shell *args:
+    cargo run -p assist-cli -- shell {{args}}
+
 # fmt check + clippy (warnings are errors) + dependency licenses/advisories
 lint:
     cargo fmt --all -- --check

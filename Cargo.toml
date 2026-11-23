@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/assist-core", "crates/assist-actions"]
+members = ["crates/assist-core", "crates/assist-actions", "crates/assist-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,7 +11,11 @@ repository = "https://github.com/wyserian/assist"
 publish = false
 
 [workspace.dependencies]
+assist-actions = { path = "crates/assist-actions" }
+anyhow = "1"
 assist-core = { path = "crates/assist-core" }
+clap = { version = "4", features = ["derive"] }
+directories = "6"
 insta = "1"
 open = "5"
 process-wrap = { version = "10", default-features = false }

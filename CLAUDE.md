@@ -57,7 +57,8 @@ stack, phases and security rules. Work on the current phase only.
 just build        # cargo build --workspace
 just test         # cargo nextest run --workspace
 just lint         # fmt --check + clippy -D warnings + cargo deny check
-just run          # cargo run -p assist-cli -- serve
+just shell        # cargo run -p assist-cli -- shell (in-process REPL, Phase 1a)
+just run          # cargo run -p assist-cli -- serve (Phase 1b)
 just android      # cargo ndk build + gradle assembleDebug (Phase 4+)
 ```
 
