@@ -257,7 +257,7 @@ pub struct JobCtx { job: JobId, principal: Principal, cancel: CancellationToken,
 A small key/value store of current state, updated by adapters, read by triggers, policy, context
 grammars and pipe conditions: `node.battery`, `node.charging`, `net.ssid`, `screen.locked`,
 `app.focused`, `location.zone` (phone), `user.away`. Facts are not synced by default; a node can
-publish selected facts to the hub. (Design in Phase 1, first facts in Phase 3.)
+publish selected facts to the hub. (Built in Phase 3 together with its first consumers.)
 
 ### 3.11 Pipes
 
@@ -832,7 +832,7 @@ with validation, phrase parser → regex matcher behind `Matcher` trait, normali
 **Phase 1a — CLI MVP (no daemon)**
 `assist shell` REPL with the core in-process: dialog (slots, disambiguation, follow-ups,
 corrections, confirm, cancel), policy table, scheduler (lanes, cancel, timeouts, tree kill),
-audit log, fact store interface. Actions: shell (`$`), scripts, open app, search.
+audit log. Actions: shell (`$`), scripts, open app, search.
 *Done when:* `$ ls`, "run build", "open firefox", "search rust tokio" work, risky commands are
 confirmed, two jobs run in parallel and one can be stopped.
 
@@ -853,7 +853,7 @@ templates, stop-on-wake-word barge-in.
 OCR, screenshot, recording, bulk rename (dry run, confirm, undo), STT from file, pipes with
 transforms, `on_error` / `retry` / `if`, taint rule, saved pipes, schedules (missed policy), file
 watch and fact triggers, pause of running processes, per-job CPU/RAM, auto-start, proactive
-engine (rules, quiet hours, rate limits), explicit memory ("remember …") + Memory tab,
+engine (rules, quiet hours, rate limits), fact store (§3.10), explicit memory ("remember …") + Memory tab,
 rule-based autopilot goals (saved pipes + triggers + budgets) + Autopilot tab.
 
 **Phase 4 — Android app**
@@ -954,6 +954,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-23 | Interop: MQTT discovery, webhooks, MCP server; evaluate hassil phrase compatibility |
 | 2026-11-23 | `cargo-audit`, `cedar-policy`, `rcgen`, `serde_yaml`, `interprocess` dropped or deferred |
 | 2026-11-23 | Phrase parser hand-written (~100 lines, grammar is tiny); `winnow` dropped |
+| 2026-11-24 | Fact store moved from Phase 1a to Phase 3 (its first consumers); policy confirm variants for voice ("on screen") and the taint rule land with voice (Phase 2) and pipes (Phase 3) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

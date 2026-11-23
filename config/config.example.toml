@@ -21,3 +21,7 @@ dad = "+910000000001"
 [commands.send_sms]
 ask.text = "What's the message?"
 risky = true
+
+# Overrides of the default policy table (PLAN.md §3.6). Dotted capability names need quotes.
+[policy]
+shell = { owner_remote = "deny" }

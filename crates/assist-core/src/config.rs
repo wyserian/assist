@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::phrases::PhraseSet;
+use crate::policy::PolicyOverrides;
 
 /// The config format version this build reads.
 pub const CURRENT_VERSION: u32 = 1;
@@ -32,6 +33,9 @@ pub struct Config {
     /// Per-command settings, keyed by command name.
     #[serde(default)]
     pub commands: BTreeMap<String, CommandConfig>,
+    /// Overrides of the default policy table (PLAN.md §3.6).
+    #[serde(default)]
+    pub policy: PolicyOverrides,
 }
 
 /// Settings for one command (`[commands.<name>]`).
