@@ -1,0 +1,119 @@
+# Matcher test cases, run against config/config.example.toml and the default English phrases.
+# A case without `command` must match nothing.
+
+# open / close apps
+[[case]]
+text = "open firefox"
+command = "open_app"
+slots = { app = "firefox" }
+
+[[case]]
+text = "Launch Firefox!"
+command = "open_app"
+slots = { app = "firefox" }
+
+[[case]]
+text = "start the terminal app"
+command = "open_app"
+slots = { app = "terminal" }
+
+[[case]]
+text = "bring up notepad"
+command = "open_app"
+slots = { app = "notepad" }
+
+[[case]]
+text = "open firfox"
+command = "open_app"
+slots = { app = "firefox" }
+
+[[case]]
+text = "close firefox"
+command = "close_app"
+slots = { app = "firefox" }
+
+[[case]]
+text = "quit the terminal"
+command = "close_app"
+slots = { app = "terminal" }
+
+# scripts
+[[case]]
+text = "run build"
+command = "run_script"
+slots = { script = "build" }
+
+[[case]]
+text = "run the backup script"
+command = "run_script"
+slots = { script = "backup" }
+
+[[case]]
+text = "start backup script"
+command = "run_script"
+slots = { script = "backup" }
+
+# search
+[[case]]
+text = "search rust tokio"
+command = "search"
+slots = { query = "rust tokio" }
+
+[[case]]
+text = "search the web for rust tokio"
+command = "search"
+slots = { query = "rust tokio" }
+
+[[case]]
+text = "look up weather today"
+command = "search"
+slots = { query = "weather today" }
+
+# messaging
+[[case]]
+text = "text mom"
+command = "send_sms"
+slots = { contact = "mom" }
+
+[[case]]
+text = "send a message to dad saying I'm late"
+command = "send_sms"
+slots = { contact = "dad", text = "i'm late" }
+
+[[case]]
+text = "text mom that dinner is ready"
+command = "send_sms"
+slots = { contact = "mom", text = "dinner is ready" }
+
+[[case]]
+text = "call dad"
+command = "call"
+slots = { contact = "dad" }
+
+# media
+[[case]]
+text = "set volume to 50"
+command = "set_volume"
+slots = { level = "50" }
+
+[[case]]
+text = "volume fifty"
+command = "set_volume"
+slots = { level = "50" }
+
+[[case]]
+text = "set the volume to 75%"
+command = "set_volume"
+slots = { level = "75" }
+
+[[case]]
+text = "turn volume to twenty-five"
+command = "set_volume"
+slots = { level = "25" }
+
+# no match
+[[case]]
+text = "make me a sandwich"
+
+[[case]]
+text = "open banana"

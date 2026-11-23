@@ -1,0 +1,41 @@
+---
+source: crates/assist-core/src/phrase.rs
+expression: "parse(\"text .contact. ((saying|that) .text.)?\").unwrap()"
+---
+Choice(
+    [
+        [
+            Word(
+                "text",
+            ),
+            Slot(
+                "contact",
+            ),
+            Optional(
+                Choice(
+                    [
+                        [
+                            Choice(
+                                [
+                                    [
+                                        Word(
+                                            "saying",
+                                        ),
+                                    ],
+                                    [
+                                        Word(
+                                            "that",
+                                        ),
+                                    ],
+                                ],
+                            ),
+                            Slot(
+                                "text",
+                            ),
+                        ],
+                    ],
+                ),
+            ),
+        ],
+    ],
+)

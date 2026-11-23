@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = ["crates/assist-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/wyserian/assist"
+
+[workspace.dependencies]
+insta = "1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+strsim = "0.11"
+thiserror = "2"
+toml = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+# panic stays "unwind": an action panic never kills the daemon, and UniFFI needs unwinding.
+[profile.release]
+strip = true
+
+# Shipped builds only (cargo-dist); slow to build, so not the default release profile.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
+[profile.android]
+inherits = "dist"
+opt-level = "s"
+
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies optimized in dev; our own code still compiles fast.
+[profile.dev.package."*"]
+opt-level = 2

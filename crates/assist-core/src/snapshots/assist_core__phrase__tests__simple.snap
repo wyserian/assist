@@ -1,0 +1,16 @@
+---
+source: crates/assist-core/src/phrase.rs
+expression: "parse(\"Open .app.\").unwrap()"
+---
+Choice(
+    [
+        [
+            Word(
+                "open",
+            ),
+            Slot(
+                "app",
+            ),
+        ],
+    ],
+)

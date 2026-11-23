@@ -1,0 +1,12 @@
+# Open and close configured apps ([apps] in config.toml).
+
+[open_app]
+slots = { app = "list:apps" }
+phrases = [
+    "(open|launch|start) (the)? .app. (app)?",
+    "bring up .app.",
+]
+
+[close_app]
+slots = { app = "list:apps" }
+phrases = ["(close|quit|exit) (the)? .app. (app)?"]

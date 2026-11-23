@@ -1,0 +1,8 @@
+# Web search.
+
+[search]
+slots = { query = "text" }
+phrases = [
+    "(search|google|look up) (for)? .query.",
+    "search the web for .query.",
+]

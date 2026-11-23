@@ -1,0 +1,8 @@
+# Media controls.
+
+[set_volume]
+slots = { level = "number" }
+phrases = [
+    "(set)? (the)? volume (to)? .level. (percent)?",
+    "turn (the)? volume (to)? .level. (percent)?",
+]

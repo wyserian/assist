@@ -193,7 +193,7 @@ Slot types:
 - `number`, `duration`, `time` — built-in parsers.
 - `text` — free text (dictation in voice mode).
 
-Implementation: `winnow` parses phrases → compiled to `regex`; a `RegexSet` finds candidates,
+Implementation: a small hand-written parser (no library) → compiled to `regex`; a `RegexSet` finds candidates,
 captures fill slots. Tie-break: most literal words wins. Default phrases are embedded in the
 binary; user files override per command. The matcher sits behind a `Matcher` trait so the
 semantic and LLM stages plug in without changing callers.
@@ -417,7 +417,7 @@ Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM plan
 | Async runtime | `tokio`; ⊕ `tokio-util` (`CancellationToken`) |
 | Serialization | `serde`, `serde_json` (MessagePack deferred) |
 | Config | `toml`, ⊕ `toml_edit`, `directories` |
-| Phrases / matching | `winnow` → ⊕ `regex`; `strsim` |
+| Phrases / matching | hand-written phrase parser → ⊕ `regex`; `strsim` |
 | Semantic match (Phase 2) | sentence-embedding ONNX model via the voice runtime (sherpa-onnx / `ort`) |
 | Storage | `rusqlite` (bundled, WAL) from Phase 1b |
 | IDs, audit chain | ⊕ `uuid`, ⊕ `sha2` |
@@ -953,6 +953,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-23 | Phase 1 split into 1a (CLI) and 1b (daemon + UI) |
 | 2026-11-23 | Interop: MQTT discovery, webhooks, MCP server; evaluate hassil phrase compatibility |
 | 2026-11-23 | `cargo-audit`, `cedar-policy`, `rcgen`, `serde_yaml`, `interprocess` dropped or deferred |
+| 2026-11-23 | Phrase parser hand-written (~100 lines, grammar is tiny); `winnow` dropped |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

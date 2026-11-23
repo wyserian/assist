@@ -1,0 +1,23 @@
+# assist configuration — Phase 0 subset.
+# Only sections the current phase reads are accepted; unknown keys are errors (typos never
+# pass silently). Sections from PLAN.md §6 are added as their phases land.
+
+config_version = 1
+
+[apps]
+firefox  = { windows = "firefox.exe", linux = "firefox", android = "org.mozilla.firefox" }
+code     = { windows = "code.cmd", linux = "code" }
+terminal = { windows = "wt.exe", linux = "x-terminal-emulator" }
+notepad  = { windows = "notepad.exe", linux = "gedit" }
+
+[scripts]
+backup = { windows = "C:/scripts/backup.ps1", linux = "~/scripts/backup.sh" }
+build  = { run = "cargo build", lane = "background" }
+
+[contacts]
+mom = "+910000000000"
+dad = "+910000000001"
+
+[commands.send_sms]
+ask.text = "What's the message?"
+risky = true

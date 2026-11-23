@@ -1,0 +1,8 @@
+# Run named scripts ([scripts] in config.toml).
+
+[run_script]
+slots = { script = "list:scripts" }
+phrases = [
+    "(run|execute) (the)? .script. (script)?",
+    "start (the)? .script. script",
+]

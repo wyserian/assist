@@ -1,0 +1,52 @@
+---
+source: crates/assist-core/src/phrase.rs
+expression: "parse(\"(send (a)? message|text) (to)? .contact.\").unwrap()"
+---
+Choice(
+    [
+        [
+            Choice(
+                [
+                    [
+                        Word(
+                            "send",
+                        ),
+                        Optional(
+                            Choice(
+                                [
+                                    [
+                                        Word(
+                                            "a",
+                                        ),
+                                    ],
+                                ],
+                            ),
+                        ),
+                        Word(
+                            "message",
+                        ),
+                    ],
+                    [
+                        Word(
+                            "text",
+                        ),
+                    ],
+                ],
+            ),
+            Optional(
+                Choice(
+                    [
+                        [
+                            Word(
+                                "to",
+                            ),
+                        ],
+                    ],
+                ),
+            ),
+            Slot(
+                "contact",
+            ),
+        ],
+    ],
+)

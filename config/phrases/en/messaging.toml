@@ -1,0 +1,11 @@
+# SMS and calls to configured contacts ([contacts] in config.toml).
+
+[send_sms]
+slots = { contact = "list:contacts", text = "text" }
+phrases = [
+    "(send (a)? (message|text|sms)|text|message) (to)? .contact. ((saying|that) .text.)?",
+]
+
+[call]
+slots = { contact = "list:contacts" }
+phrases = ["(call|phone|ring|dial) .contact."]
