@@ -18,6 +18,7 @@ assist-actions.workspace = true
 assist-core.workspace = true
 clap.workspace = true
 directories.workspace = true
+keyring.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal", "sync"] }
 
 [lints]

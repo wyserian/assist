@@ -5,7 +5,6 @@
 //!
 //! shortcut: each month file starts its own chain, so deleting a whole month file is not
 //! detected; anchor each file to the previous one when logs are exported or synced.
-//! shortcut: secret values in titles are not redacted; redact them once secrets are stored.
 
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};

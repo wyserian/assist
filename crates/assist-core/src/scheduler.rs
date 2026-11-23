@@ -5,6 +5,7 @@
 //! broadcast as [`JobEvent`]s and every state change is audited. Only the most recent
 //! [`KEEP_FINISHED`] finished jobs stay in memory.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,6 +18,7 @@ use crate::audit::{now_ms, Audit, AuditRecord};
 use crate::config::Config;
 use crate::dialog::{CommandInfo, Plan};
 use crate::policy::Principal;
+use crate::secrets::Redactor;
 use crate::store::Store;
 use assist_proto::JobSummary;
 
@@ -81,6 +83,8 @@ pub struct Persistence {
     pub audit: Option<Audit>,
     /// Job history and full output logs.
     pub store: Option<Store>,
+    /// Scrubs secret values from titles and output before anything is stored or shown.
+    pub redactor: Option<Redactor>,
 }
 
 /// Something that happened to a job.
@@ -125,6 +129,7 @@ struct Inner {
     events: broadcast::Sender<JobEvent>,
     audit: Option<Audit>,
     store: Option<Store>,
+    redactor: Option<Redactor>,
 }
 
 struct Slot {
@@ -168,6 +173,7 @@ impl Scheduler {
                 events: broadcast::channel(EVENT_BUFFER).0,
                 audit: persistence.audit,
                 store: persistence.store,
+                redactor: persistence.redactor,
             }),
         }
     }
@@ -208,7 +214,7 @@ impl Scheduler {
         let info = JobInfo {
             id,
             command: plan.command.clone(),
-            title,
+            title: inner.redact(&title).into_owned(),
             principal: principal.clone(),
             lane,
             state: JobState::Queued,
@@ -379,7 +385,20 @@ impl Inner {
         let _ = self.events.send(event);
     }
 
+    fn redact<'a>(&self, text: &'a str) -> Cow<'a, str> {
+        match &self.redactor {
+            Some(redactor) => redactor.redact(text),
+            None => Cow::Borrowed(text),
+        }
+    }
+
     fn output(&self, id: JobId, chunk: Chunk) {
+        let chunk = match chunk {
+            Chunk::Line(text) => Chunk::Line(self.redact(&text).into_owned()),
+            Chunk::Error(text) => Chunk::Error(self.redact(&text).into_owned()),
+            Chunk::Info(text) => Chunk::Info(self.redact(&text).into_owned()),
+            other => other,
+        };
         let line = match &chunk {
             Chunk::Line(text) | Chunk::Info(text) => Some(text.clone()),
             Chunk::Error(text) => Some(format!("! {text}")),
@@ -467,6 +486,7 @@ mod tests {
         Echo,
         Fail,
         Wait,
+        Leak,
     }
 
     struct Fake {
@@ -509,6 +529,11 @@ mod tests {
                         Ok(())
                     }
                     Behavior::Fail => Err(ActionError::exit(3)),
+                    Behavior::Leak => {
+                        let line = "token=sk-test-secret-value".to_owned();
+                        let _ = out.send(Chunk::Line(line)).await;
+                        Ok(())
+                    }
                     Behavior::Wait => {
                         ctx.cancel.cancelled().await;
                         Ok(())
@@ -637,6 +662,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn secrets_are_redacted_from_titles_and_output() {
+        let redactor = Redactor::default();
+        redactor.add("api", "sk-test-secret-value");
+        let config = Arc::new(Config::from_toml("").unwrap());
+        let s = Scheduler::new(
+            vec![Fake::action("leak", Behavior::Leak)],
+            config,
+            Persistence {
+                redactor: Some(redactor),
+                ..Persistence::default()
+            },
+        );
+        let mut events = s.subscribe();
+        let plan = Plan {
+            command: "leak".to_owned(),
+            slots: BTreeMap::new(),
+            typed: false,
+        };
+        let title = "$ curl -H sk-test-secret-value".to_owned();
+        let id = s
+            .submit(plan, Principal::local("test"), title, PathBuf::from("."))
+            .unwrap();
+        let mut lines = Vec::new();
+        loop {
+            match events.recv().await.unwrap() {
+                JobEvent::Output {
+                    chunk: Chunk::Line(text),
+                    ..
+                } => lines.push(text),
+                JobEvent::State { state, .. } if state.is_finished() => break,
+                _ => {}
+            }
+        }
+        assert_eq!(lines, ["token=[secret:api]"]);
+        assert_eq!(s.tail(id).unwrap(), ["token=[secret:api]"]);
+        assert_eq!(s.get(id).unwrap().title, "$ curl -H [secret:api]");
+    }
+
+    #[tokio::test]
     async fn unknown_command_is_rejected() {
         let s = scheduler("");
         let plan = Plan {
@@ -667,7 +731,7 @@ mod tests {
             config,
             Persistence {
                 audit: Some(audit),
-                store: None,
+                ..Persistence::default()
             },
         );
         let mut events = s.subscribe();

@@ -10,8 +10,11 @@ use assist_core::config::Config;
 use assist_core::dialog::Engine;
 use assist_core::phrases::PhraseSet;
 use assist_core::scheduler::{Persistence, Scheduler};
+use assist_core::secrets::Secrets;
 use assist_core::store::Store;
 use directories::ProjectDirs;
+
+use crate::keystore::OsKeystore;
 
 /// Where config and data live.
 pub struct Paths {
@@ -78,12 +81,18 @@ impl Assistant {
                 report.interrupted
             );
         }
+        // Without a keystore the assistant still runs; secrets and redaction are off.
+        let secrets = OsKeystore::open()
+            .and_then(|keystore| Secrets::open(Box::new(keystore), &paths.data))
+            .map_err(|err| println!("Secrets are off: {err}"))
+            .ok();
         let scheduler = Scheduler::new(
             assist_actions::builtin(),
             Arc::clone(&config),
             Persistence {
                 audit: Some(audit.clone()),
                 store: Some(store.clone()),
+                redactor: secrets.as_ref().map(Secrets::redactor),
             },
         );
         let phrases = PhraseSet::default_en()?;

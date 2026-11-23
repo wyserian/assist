@@ -14,4 +14,5 @@ pub mod phrases;
 pub mod policy;
 mod private_fs;
 pub mod scheduler;
+pub mod secrets;
 pub mod store;
