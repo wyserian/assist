@@ -2,6 +2,7 @@
 
 [send_sms]
 slots = { contact = "list:contacts", text = "text" }
+ask = { contact = "To whom?", text = "What's the message?" }
 phrases = [
     "(send (a)? (message|text|sms)|text|message) (to)? .contact. ((saying|that) .text.)?",
 ]

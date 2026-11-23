@@ -1,0 +1,14 @@
+---
+source: crates/assist-core/src/dialog.rs
+expression: "transcript(Arc::clone(&full),\n&[\"text sam\", \"roy\", \"Hello there\", \"no, I meant mom\", \"yes\"])"
+---
+> text sam
+< Did you mean sam lee or sam roy?
+> roy
+< What's the message?
+> Hello there
+< send_sms: contact = sam roy (+910000000003), text = "Hello there"? (yes/no)
+> no, I meant mom
+< send_sms: contact = mom (+910000000000), text = "Hello there"? (yes/no)
+> yes
+! send_sms: contact = mom (+910000000000), text = "Hello there"

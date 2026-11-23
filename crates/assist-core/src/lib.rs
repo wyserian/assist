@@ -4,6 +4,7 @@
 //! Nothing here touches the mic, speaker, screen, OS or network.
 
 pub mod config;
+pub mod dialog;
 pub mod matcher;
 pub mod normalize;
 pub mod phrase;

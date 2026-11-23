@@ -16,14 +16,21 @@ use crate::phrases::PhraseSet;
 
 /// Minimum similarity (0–1) for a fuzzy `list:` slot match, e.g. "firfox" → "firefox".
 const FUZZY_MIN: f64 = 0.8;
+/// Similarity when the input is the leading or trailing whole words of a value ("sam" → "sam lee").
+const PARTIAL_SCORE: f64 = 0.9;
+/// Candidates this close to the best one count as ambiguous ("sam lee" vs "sam roy").
+const AMBIGUITY_MARGIN: f64 = 0.05;
 
 /// A recognised command with its resolved slots.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Intent {
     /// Command name, e.g. `send_sms`.
     pub command: String,
-    /// Slot name → value. `list:` slots hold the config key, `number` slots digits.
+    /// Slot name → value. `list:` slots hold the config key (the best candidate if
+    /// ambiguous), `number` slots digits.
     pub slots: BTreeMap<String, String>,
+    /// `list:` slots with several equally good candidates, best first; the dialog asks.
+    pub ambiguous: BTreeMap<String, Vec<String>>,
 }
 
 /// Anything that turns text into an intent. The semantic and LLM stages (Phases 2 and 7)
@@ -31,6 +38,17 @@ pub struct Intent {
 pub trait Matcher: Send + Sync {
     /// The best intent for `text`, or `None` if nothing matches.
     fn best(&self, text: &str) -> Option<Intent>;
+}
+
+/// The type of a slot, declared in the phrase file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlotType {
+    /// Free text.
+    Text,
+    /// A whole number, digits or words.
+    Number,
+    /// One of the keys of a config list: `apps`, `contacts` or `scripts`.
+    List(String),
 }
 
 /// Why phrases could not be compiled.
@@ -79,19 +97,20 @@ pub enum BuildError {
     Regex(#[from] regex::Error),
 }
 
-#[derive(Debug, Clone)]
-enum SlotKind {
-    Text,
-    Number,
-    List(String),
-}
-
 #[derive(Debug)]
 struct CompiledPhrase {
     command: String,
     regex: Regex,
     /// Capture group `i + 1` holds `slots[i]`.
-    slots: Vec<(String, SlotKind)>,
+    slots: Vec<(String, SlotType)>,
+}
+
+/// Slots resolved from one phrase match.
+struct Extracted {
+    slots: BTreeMap<String, String>,
+    ambiguous: BTreeMap<String, Vec<String>>,
+    /// Input words consumed by slots.
+    captured: usize,
 }
 
 /// The deterministic rule matcher built from phrase files and config lists.
@@ -99,6 +118,8 @@ struct CompiledPhrase {
 pub struct RuleMatcher {
     set: RegexSet,
     phrases: Vec<CompiledPhrase>,
+    /// Command → slot → type.
+    types: BTreeMap<String, BTreeMap<String, SlotType>>,
     /// List name → (normalized value, config key).
     lists: BTreeMap<String, Vec<(String, String)>>,
 }
@@ -113,8 +134,9 @@ impl RuleMatcher {
             .collect();
 
         let mut compiled = Vec::new();
+        let mut types = BTreeMap::new();
         for (command, spec) in phrases.commands() {
-            let kinds = slot_kinds(command, &spec.slots, &lists)?;
+            let kinds = slot_types(command, &spec.slots, &lists)?;
             for text in &spec.phrases {
                 let node = phrase::parse(text).map_err(|source| BuildError::Syntax {
                     command: command.to_owned(),
@@ -136,43 +158,76 @@ impl RuleMatcher {
                     slots,
                 });
             }
+            types.insert(command.to_owned(), kinds);
         }
         let set = RegexSet::new(compiled.iter().map(|p| p.regex.as_str()))?;
         Ok(Self {
             set,
             phrases: compiled,
+            types,
             lists,
         })
     }
 
-    /// Resolved slots and the number of input words they consumed, or `None` if a slot
-    /// value is not valid for its type.
-    fn extract(
-        &self,
-        phrase: &CompiledPhrase,
-        input: &str,
-    ) -> Option<(BTreeMap<String, String>, usize)> {
-        let caps = phrase.regex.captures(input)?;
-        let mut slots = BTreeMap::new();
-        let mut captured = 0;
-        for (i, (name, kind)) in phrase.slots.iter().enumerate() {
-            let Some(m) = caps.get(i + 1) else { continue };
-            // The same slot can appear in several alternatives; the first that matched wins.
-            if slots.contains_key(name) {
-                continue;
-            }
-            captured += m.as_str().split(' ').count();
-            slots.insert(name.clone(), self.resolve(kind, m.as_str())?);
-        }
-        Some((slots, captured))
+    /// The declared slots of a command and their types.
+    pub fn slots(&self, command: &str) -> Option<&BTreeMap<String, SlotType>> {
+        self.types.get(command)
     }
 
-    fn resolve(&self, kind: &SlotKind, value: &str) -> Option<String> {
-        match kind {
-            SlotKind::Text => Some(value.to_owned()),
-            SlotKind::Number => parse_number(value).map(|n| n.to_string()),
-            SlotKind::List(list) => fuzzy_pick(self.lists.get(list)?, value),
+    /// Keys of config list `list` that match normalized `value`, best first. Several are
+    /// returned only when they are about equally close; an exact match is never ambiguous.
+    pub fn candidates(&self, list: &str, value: &str) -> Vec<String> {
+        let Some(entries) = self.lists.get(list) else {
+            return Vec::new();
+        };
+        let mut scored: Vec<(f64, &String)> = entries
+            .iter()
+            .map(|(normalized, key)| (similarity(normalized, value), key))
+            .filter(|(score, _)| *score >= FUZZY_MIN)
+            .collect();
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let Some(&(top, _)) = scored.first() else {
+            return Vec::new();
+        };
+        let margin = if top >= 1.0 { 0.0 } else { AMBIGUITY_MARGIN };
+        scored
+            .into_iter()
+            .take_while(|(score, _)| *score >= top - margin)
+            .map(|(_, key)| key.clone())
+            .collect()
+    }
+
+    /// Resolved slots, or `None` if a slot value is not valid for its type.
+    fn extract(&self, phrase: &CompiledPhrase, input: &str) -> Option<Extracted> {
+        let caps = phrase.regex.captures(input)?;
+        let mut out = Extracted {
+            slots: BTreeMap::new(),
+            ambiguous: BTreeMap::new(),
+            captured: 0,
+        };
+        for (i, (name, ty)) in phrase.slots.iter().enumerate() {
+            let Some(m) = caps.get(i + 1) else { continue };
+            // The same slot can appear in several alternatives; the first that matched wins.
+            if out.slots.contains_key(name) {
+                continue;
+            }
+            let value = m.as_str();
+            out.captured += value.split(' ').count();
+            let resolved = match ty {
+                SlotType::Text => value.to_owned(),
+                SlotType::Number => parse_number(value)?.to_string(),
+                SlotType::List(list) => {
+                    let candidates = self.candidates(list, value);
+                    let best = candidates.first()?.clone();
+                    if candidates.len() > 1 {
+                        out.ambiguous.insert(name.clone(), candidates);
+                    }
+                    best
+                }
+            };
+            out.slots.insert(name.clone(), resolved);
         }
+        Some(out)
     }
 }
 
@@ -189,10 +244,10 @@ impl Matcher for RuleMatcher {
         let mut best: Option<(usize, Intent)> = None;
         for index in self.set.matches(&input).into_iter() {
             let phrase = &self.phrases[index];
-            let Some((slots, captured)) = self.extract(phrase, &input) else {
+            let Some(found) = self.extract(phrase, &input) else {
                 continue;
             };
-            let literal = words.saturating_sub(captured);
+            let literal = words.saturating_sub(found.captured);
             let better = match &best {
                 Some((top, _)) => literal > *top,
                 None => true,
@@ -200,7 +255,8 @@ impl Matcher for RuleMatcher {
             if better {
                 let intent = Intent {
                     command: phrase.command.clone(),
-                    slots,
+                    slots: found.slots,
+                    ambiguous: found.ambiguous,
                 };
                 best = Some((literal, intent));
             }
@@ -209,18 +265,35 @@ impl Matcher for RuleMatcher {
     }
 }
 
-fn slot_kinds(
+/// How close normalized `value` is to normalized list `entry`, 0–1.
+fn similarity(entry: &str, value: &str) -> f64 {
+    if entry == value {
+        return 1.0;
+    }
+    let leading = entry
+        .strip_prefix(value)
+        .is_some_and(|rest| rest.starts_with(' '));
+    let trailing = entry
+        .strip_suffix(value)
+        .is_some_and(|rest| rest.ends_with(' '));
+    if leading || trailing {
+        return PARTIAL_SCORE;
+    }
+    strsim::normalized_levenshtein(entry, value)
+}
+
+fn slot_types(
     command: &str,
     declared: &BTreeMap<String, String>,
     lists: &BTreeMap<String, Vec<(String, String)>>,
-) -> Result<BTreeMap<String, SlotKind>, BuildError> {
+) -> Result<BTreeMap<String, SlotType>, BuildError> {
     declared
         .iter()
         .map(|(slot, ty)| {
             let kind = match (ty.as_str(), ty.strip_prefix("list:")) {
-                ("text", _) => SlotKind::Text,
-                ("number", _) => SlotKind::Number,
-                (_, Some(list)) if lists.contains_key(list) => SlotKind::List(list.to_owned()),
+                ("text", _) => SlotType::Text,
+                ("number", _) => SlotType::Number,
+                (_, Some(list)) if lists.contains_key(list) => SlotType::List(list.to_owned()),
                 (_, Some(list)) => {
                     return Err(BuildError::UnknownList {
                         command: command.to_owned(),
@@ -244,9 +317,9 @@ fn slot_kinds(
 /// Appends the regex for `node`; returns the slot name if it is not declared.
 fn emit(
     node: &Node,
-    kinds: &BTreeMap<String, SlotKind>,
+    types: &BTreeMap<String, SlotType>,
     out: &mut String,
-    slots: &mut Vec<(String, SlotKind)>,
+    slots: &mut Vec<(String, SlotType)>,
 ) -> Result<(), String> {
     match node {
         Node::Word(word) => {
@@ -254,9 +327,9 @@ fn emit(
             out.push_str(&regex::escape(word));
         }
         Node::Slot(name) => {
-            let kind = kinds.get(name).ok_or_else(|| name.clone())?;
+            let ty = types.get(name).ok_or_else(|| name.clone())?;
             out.push_str(" (.+?)");
-            slots.push((name.clone(), kind.clone()));
+            slots.push((name.clone(), ty.clone()));
         }
         Node::Choice(alternatives) => {
             out.push_str("(?:");
@@ -265,43 +338,29 @@ fn emit(
                     out.push('|');
                 }
                 for node in sequence {
-                    emit(node, kinds, out, slots)?;
+                    emit(node, types, out, slots)?;
                 }
             }
             out.push(')');
         }
         Node::Optional(inner) => {
             out.push_str("(?:");
-            emit(inner, kinds, out, slots)?;
+            emit(inner, types, out, slots)?;
             out.push_str(")?");
         }
     }
     Ok(())
 }
 
-/// shortcut: picks the single closest value; asking "Sam Lee or Sam Roy?" when several are
-/// close is the dialog's job (Phase 1a).
-fn fuzzy_pick(entries: &[(String, String)], value: &str) -> Option<String> {
-    let mut best: Option<(f64, &String)> = None;
-    for (normalized, key) in entries {
-        let score = strsim::normalized_levenshtein(normalized, value);
-        let better = match best {
-            Some((top, _)) => score > top,
-            None => true,
-        };
-        if score >= FUZZY_MIN && better {
-            best = Some((score, key));
-        }
-    }
-    best.map(|(_, key)| key.clone())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const CONFIG: &str =
+        "[apps]\nfirefox = {}\n[contacts]\n\"sam lee\" = \"1\"\n\"sam roy\" = \"2\"\n";
+
     fn build(phrases: &str) -> Result<RuleMatcher, BuildError> {
-        let config = Config::from_toml("[apps]\nfirefox = {}\n").unwrap();
+        let config = Config::from_toml(CONFIG).unwrap();
         RuleMatcher::new(
             &PhraseSet::from_toml("test.toml", phrases).unwrap(),
             &config,
@@ -347,5 +406,19 @@ mod tests {
     fn empty_input_matches_nothing() {
         let matcher = build("[a]\nphrases = [\"hello\"]").unwrap();
         assert_eq!(matcher.best("?!"), None);
+    }
+
+    #[test]
+    fn partial_names_are_ambiguous_exact_ones_are_not() {
+        let matcher =
+            build("[call]\nslots = { who = \"list:contacts\" }\nphrases = [\"call .who.\"]")
+                .unwrap();
+        let intent = matcher.best("call sam").unwrap();
+        assert_eq!(intent.ambiguous["who"], ["sam lee", "sam roy"]);
+        let intent = matcher.best("call roy").unwrap();
+        assert_eq!(intent.slots["who"], "sam roy");
+        assert!(intent.ambiguous.is_empty());
+        assert_eq!(matcher.candidates("contacts", "sam lee"), ["sam lee"]);
+        assert!(matcher.candidates("contacts", "bob").is_empty());
     }
 }

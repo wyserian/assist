@@ -1,0 +1,12 @@
+---
+source: crates/assist-core/src/dialog.rs
+expression: "transcript(Arc::clone(&full),\n&[\"make me a sandwich\", \"no\", \"echo hi there\", \"yes\"])"
+---
+> make me a sandwich
+< I don't know that command. Run `make me a sandwich` in the shell? (yes/no)
+> no
+< Okay, not doing that.
+> echo hi there
+< I don't know that command. Run `echo hi there` in the shell? (yes/no)
+> yes
+! $ echo hi there

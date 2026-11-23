@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::dialog::SHELL;
 use crate::phrases::PhraseSet;
 use crate::policy::PolicyOverrides;
 
@@ -117,10 +118,11 @@ impl Config {
         Self::from_toml(&src)
     }
 
-    /// Checks that every `[commands.<name>]` names a command defined in `phrases`, so a typo
-    /// can never silently drop `risky = true`.
+    /// Checks that every `[commands.<name>]` names a command defined in `phrases` (or the
+    /// built-in `shell`), so a typo can never silently drop `risky = true`.
     pub fn validate_commands(&self, phrases: &PhraseSet) -> Result<(), ConfigError> {
-        match self.commands.keys().find(|name| !phrases.contains(name)) {
+        let unknown = |name: &&String| !phrases.contains(name) && name.as_str() != SHELL;
+        match self.commands.keys().find(unknown) {
             Some(name) => Err(ConfigError::UnknownCommand(name.clone())),
             None => Ok(()),
         }

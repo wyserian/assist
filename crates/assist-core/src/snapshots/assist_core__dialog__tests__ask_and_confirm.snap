@@ -1,0 +1,10 @@
+---
+source: crates/assist-core/src/dialog.rs
+expression: "transcript(Arc::clone(&full), &[\"text mom\", \"I'm late\", \"yes\"])"
+---
+> text mom
+< What's the message?
+> I'm late
+< send_sms: contact = mom (+910000000000), text = "I'm late"? (yes/no)
+> yes
+! send_sms: contact = mom (+910000000000), text = "I'm late"

@@ -1,0 +1,6 @@
+---
+source: crates/assist-core/src/dialog.rs
+expression: "transcript(engine(true, fewer), &[\"call dad\"])"
+---
+> call dad
+< call isn't available on this device.

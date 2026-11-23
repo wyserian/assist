@@ -1,0 +1,12 @@
+---
+source: crates/assist-core/src/dialog.rs
+expression: "transcript(Arc::clone(&full), &[\"text mom\", \"cancel\", \"call dad\", \"stop\"])"
+---
+> text mom
+< What's the message?
+> cancel
+< Cancelled.
+> call dad
+< call: contact = dad (+910000000001)? (yes/no)
+> stop
+< Cancelled.

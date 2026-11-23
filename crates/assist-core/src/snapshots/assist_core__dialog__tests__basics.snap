@@ -1,0 +1,15 @@
+---
+source: crates/assist-core/src/dialog.rs
+expression: "transcript(Arc::clone(&full),\n&[\"open firefox\", \"close it\", \"$ ls -la\", \"run build\",\n\"open firefox and search rust tokio\",])"
+---
+> open firefox
+! open_app: app = firefox
+> close it
+! close_app: app = firefox
+> $ ls -la
+! $ ls -la
+> run build
+! run_script: script = build
+> open firefox and search rust tokio
+! open_app: app = firefox
+! search: query = "rust tokio"

@@ -1,0 +1,8 @@
+---
+source: crates/assist-core/src/dialog.rs
+expression: "transcript(engine(false, commands()), &[\"make me a sandwich\", \"$\"])"
+---
+> make me a sandwich
+< Sorry, I didn't understand that.
+> $
+< Type a command after $.

@@ -45,6 +45,9 @@ pub struct CommandSpec {
     pub slots: BTreeMap<String, String>,
     /// Phrases in the syntax of [`crate::phrase`].
     pub phrases: Vec<String>,
+    /// Question per slot to ask when it is missing; config `ask` overrides these.
+    #[serde(default)]
+    pub ask: BTreeMap<String, String>,
 }
 
 /// All known commands, keyed by name (sorted, so matching is deterministic).

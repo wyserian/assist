@@ -19,7 +19,7 @@ mom = "+910000000000"
 dad = "+910000000001"
 
 [commands.send_sms]
-ask.text = "What's the message?"
+ask.text = "What should the message say?"   # overrides the phrase file's question
 risky = true
 
 # Overrides of the default policy table (PLAN.md §3.6). Dotted capability names need quotes.
