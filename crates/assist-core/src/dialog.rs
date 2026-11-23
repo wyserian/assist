@@ -1,4 +1,4 @@
-//! Conversation state machine (PLAN.md §3.5).
+//! Conversation state machine (PLAN.md section 3.5).
 //!
 //! One [`Dialog`] per conversation. It turns text into [`Plan`]s to run: it asks for missing
 //! slots, asks "A or B?" for ambiguous names, reads risky actions back for a "yes", handles
@@ -15,7 +15,7 @@ use crate::normalize::{normalize, parse_number};
 use crate::phrases::PhraseSet;
 use crate::policy::{Capability, Decision, Policy, Principal, Request};
 
-/// The built-in command for `$ …` input; its slot `command` holds the exact text.
+/// The built-in command for `$ ...` input; its slot `command` holds the exact text.
 pub const SHELL: &str = "shell";
 
 /// How long a question waits for its answer.
@@ -73,7 +73,7 @@ pub struct Engine {
     matcher: RuleMatcher,
     policy: Policy,
     commands: BTreeMap<String, CommandInfo>,
-    /// Command → slot → question.
+    /// Command -> slot -> question.
     asks: BTreeMap<String, BTreeMap<String, String>>,
     offer_shell: bool,
 }
@@ -375,7 +375,7 @@ impl Dialog {
             let decision = self.engine.decision(&self.owner, &plan);
             if decision.is_some_and(|d| d != Decision::Deny) {
                 reply.say.push(format!(
-                    "I don't know that command. Run `{raw}` in the shell? (yes/no)"
+                    "I don't know that command. Run \"{raw}\" in the shell? (yes/no)"
                 ));
                 self.state = State::Confirming { plan, intent: None };
                 return;

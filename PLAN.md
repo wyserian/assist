@@ -955,6 +955,8 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-23 | `cargo-audit`, `cedar-policy`, `rcgen`, `serde_yaml`, `interprocess` dropped or deferred |
 | 2026-11-23 | Phrase parser hand-written (~100 lines, grammar is tiny); `winnow` dropped |
 | 2026-11-24 | Fact store moved from Phase 1a to Phase 3 (its first consumers); policy confirm variants for voice ("on screen") and the taint rule land with voice (Phase 2) and pipes (Phase 3) |
+| 2026-11-24 | Quality bar in CLAUDE.md: reusable, bounded, extensible, current-state comments, plain ASCII output (no AI-style typography), user-only data files, pinned CI actions, dependency re-audit before each push |
+| 2026-11-24 | Search engine configurable via `[search] url` (http/https with {query}); default DuckDuckGo |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

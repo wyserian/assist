@@ -1,4 +1,4 @@
-//! `assist`: the command-line entry point (PLAN.md §7.1).
+//! `assist`: the command-line entry point (PLAN.md section 7.1).
 
 use std::path::PathBuf;
 
@@ -23,7 +23,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Interactive shell: type commands, `$ cmd` for the system shell, `help` for more.
+    /// Interactive shell: type commands, "$ cmd" for the system shell, "help" for more.
     Shell,
 }
 

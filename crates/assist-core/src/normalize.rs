@@ -51,7 +51,7 @@ const TENS: [&str; 8] = [
 
 /// Parses a non-negative whole number from digits or English words in normalized text.
 ///
-/// shortcut: words cover 0–99 and "(a|one) hundred"; extend when a command needs larger
+/// shortcut: words cover 0 to 99 and "(a|one) hundred"; extend when a command needs larger
 /// numbers or decimals.
 pub fn parse_number(text: &str) -> Option<u32> {
     if let Ok(n) = text.parse::<u32>() {

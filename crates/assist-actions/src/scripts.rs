@@ -9,7 +9,7 @@
 //! build  = { run = "cargo build", lane = "background" }
 //! ```
 //!
-//! shortcut: the command is passed to the shell as written, so paths with spaces need quotes.
+//! The command is passed to the shell as written, so quote paths that contain spaces.
 
 use assist_core::action::{Action, ActionError, BoxFuture, Input, JobCtx, Lane, Manifest, Output};
 use assist_core::config::Config;

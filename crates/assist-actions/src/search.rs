@@ -1,6 +1,4 @@
-//! "search rust tokio": opens a web search in the default browser.
-//!
-//! shortcut: always DuckDuckGo; make the engine configurable when someone asks.
+//! "search rust tokio": opens a web search in the default browser, using `[search] url`.
 
 use assist_core::action::{
     Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest, Output,
@@ -25,7 +23,7 @@ impl Action for Search {
     fn run(&self, ctx: JobCtx, _input: Input, out: Output) -> BoxFuture<Result<(), ActionError>> {
         Box::pin(async move {
             let query = ctx.plan.slots.get("query").cloned().unwrap_or_default();
-            let url = search_url(&query);
+            let url = search_url(&ctx.config.search.url, &query);
             tokio::task::spawn_blocking(move || open::that_detached(url))
                 .await
                 .map_err(|err| ActionError::new(err.to_string()))?
@@ -38,33 +36,40 @@ impl Action for Search {
     }
 }
 
-fn search_url(query: &str) -> String {
-    let mut url = String::from("https://duckduckgo.com/?q=");
+/// `template` with `{query}` replaced by the URL-encoded query.
+fn search_url(template: &str, query: &str) -> String {
+    let mut encoded = String::with_capacity(query.len());
     for byte in query.bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                url.push(char::from(byte));
+                encoded.push(char::from(byte));
             }
-            b' ' => url.push('+'),
-            other => url.push_str(&format!("%{other:02X}")),
+            b' ' => encoded.push('+'),
+            other => encoded.push_str(&format!("%{other:02X}")),
         }
     }
-    url
+    template.replacen("{query}", &encoded, 1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const DDG: &str = "https://duckduckgo.com/?q={query}";
+
     #[test]
     fn query_is_url_encoded() {
         assert_eq!(
-            search_url("rust tokio"),
+            search_url(DDG, "rust tokio"),
             "https://duckduckgo.com/?q=rust+tokio"
         );
         assert_eq!(
-            search_url("c++ & é?"),
+            search_url(DDG, "c++ & \u{e9}?"),
             "https://duckduckgo.com/?q=c%2B%2B+%26+%C3%A9%3F"
+        );
+        assert_eq!(
+            search_url("http://localhost:8080/search?q={query}&lang=en", "a b"),
+            "http://localhost:8080/search?q=a+b&lang=en"
         );
     }
 }

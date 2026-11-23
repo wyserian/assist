@@ -1,7 +1,7 @@
-//! `$ …`: runs one non-interactive command in PowerShell or bash, streaming its output.
+//! `$ ...`: runs one non-interactive command in PowerShell or bash, streaming its output.
 //!
 //! `cd <dir>` is handled here so the working directory persists per conversation.
-//! shortcut: `cd` inside a compound command (`cd x && make`) only affects that command.
+//! `cd` inside a compound command (`cd x && make`) affects only that command.
 
 use std::path::{Component, Path, PathBuf};
 

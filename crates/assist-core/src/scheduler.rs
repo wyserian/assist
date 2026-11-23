@@ -1,8 +1,9 @@
-//! Jobs and lanes (PLAN.md §3.8).
+//! Jobs and lanes (PLAN.md section 3.8).
 //!
 //! Every confirmed [`Plan`] becomes a job. Jobs run in parallel, limited per lane, each with
 //! a timeout, a bounded output tail and a cancel token. State changes and output are
-//! broadcast as [`JobEvent`]s and every state change is audited.
+//! broadcast as [`JobEvent`]s and every state change is audited. Only the most recent
+//! [`KEEP_FINISHED`] finished jobs stay in memory.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -18,10 +19,13 @@ use crate::action::{Action, ActionError, Chunk, JobCtx, Lane};
 use crate::audit::{now_ms, Audit, AuditRecord};
 use crate::config::Config;
 use crate::dialog::{CommandInfo, Plan};
-use crate::policy::{Principal, Trust};
+use crate::policy::Principal;
 
 /// Job number, unique per daemon run.
 pub type JobId = u64;
+
+/// Finished jobs kept for `jobs` and `log`; older ones are dropped (the audit log keeps them).
+pub const KEEP_FINISHED: usize = 100;
 
 const OUTPUT_BUFFER: usize = 256;
 const EVENT_BUFFER: usize = 1024;
@@ -86,8 +90,6 @@ pub struct JobInfo {
     pub finished: Option<SystemTime>,
     /// Why it failed.
     pub error: Option<ActionError>,
-    /// The last output lines, at most `[jobs] output_tail_kb`.
-    pub tail: VecDeque<String>,
 }
 
 /// Something that happened to a job.
@@ -136,6 +138,8 @@ struct Inner {
 struct Slot {
     info: JobInfo,
     cancel: CancellationToken,
+    /// The last output lines, at most `[jobs] output_tail_kb` in total.
+    tail: VecDeque<String>,
     tail_bytes: usize,
 }
 
@@ -213,13 +217,13 @@ impl Scheduler {
             started: None,
             finished: None,
             error: None,
-            tail: VecDeque::new(),
         };
         inner.jobs().insert(
             id,
             Slot {
                 info,
                 cancel: cancel.clone(),
+                tail: VecDeque::new(),
                 tail_bytes: 0,
             },
         );
@@ -276,6 +280,23 @@ impl Scheduler {
     /// One job.
     pub fn get(&self, id: JobId) -> Option<JobInfo> {
         self.inner.jobs().get(&id).map(|slot| slot.info.clone())
+    }
+
+    /// A job's last output lines, oldest first.
+    pub fn tail(&self, id: JobId) -> Option<Vec<String>> {
+        self.inner
+            .jobs()
+            .get(&id)
+            .map(|slot| slot.tail.iter().cloned().collect())
+    }
+
+    /// How many jobs are queued or running.
+    pub fn active(&self) -> usize {
+        self.inner
+            .jobs()
+            .values()
+            .filter(|slot| !slot.info.state.is_finished())
+            .count()
     }
 
     /// Live job events from now on.
@@ -363,9 +384,9 @@ impl Inner {
             let cap = self.config.jobs.output_tail_kb * 1024;
             if let Some(slot) = self.jobs().get_mut(&id) {
                 slot.tail_bytes += line.len();
-                slot.info.tail.push_back(line);
+                slot.tail.push_back(line);
                 while slot.tail_bytes > cap {
-                    match slot.info.tail.pop_front() {
+                    match slot.tail.pop_front() {
                         Some(old) => slot.tail_bytes -= old.len(),
                         None => break,
                     }
@@ -384,6 +405,21 @@ impl Inner {
         });
         self.audit_with(id, state.as_str(), message);
         self.emit(JobEvent::State { id, state });
+        self.prune();
+    }
+
+    /// Drops the oldest finished jobs beyond [`KEEP_FINISHED`].
+    fn prune(&self) {
+        let mut jobs = self.jobs();
+        let finished: Vec<JobId> = jobs
+            .iter()
+            .filter(|(_, slot)| slot.info.state.is_finished())
+            .map(|(id, _)| *id)
+            .collect();
+        let excess = finished.len().saturating_sub(KEEP_FINISHED);
+        for id in finished.into_iter().take(excess) {
+            jobs.remove(&id);
+        }
     }
 
     fn audit(&self, id: JobId, event: &str) {
@@ -392,30 +428,24 @@ impl Inner {
 
     fn audit_with(&self, id: JobId, event: &str, error: Option<String>) {
         let Some(audit) = &self.audit else { return };
-        let Some(info) = self.jobs().get(&id).map(|slot| slot.info.clone()) else {
-            return;
+        let record = {
+            let jobs = self.jobs();
+            let Some(info) = jobs.get(&id).map(|slot| &slot.info) else {
+                return;
+            };
+            AuditRecord {
+                ts: now_ms(),
+                event: event.to_owned(),
+                job: id,
+                command: info.command.clone(),
+                title: info.title.clone(),
+                source: info.principal.source.clone(),
+                user: info.principal.user.clone(),
+                trust: info.principal.trust.as_str().to_owned(),
+                error,
+            }
         };
-        audit.record(AuditRecord {
-            ts: now_ms(),
-            event: event.to_owned(),
-            job: id,
-            command: info.command,
-            title: info.title,
-            source: info.principal.source,
-            user: info.principal.user,
-            trust: trust_name(info.principal.trust).to_owned(),
-            error,
-        });
-    }
-}
-
-fn trust_name(trust: Trust) -> &'static str {
-    match trust {
-        Trust::Local => "local",
-        Trust::OwnerRemote => "owner_remote",
-        Trust::Voice => "voice",
-        Trust::Untrusted => "untrusted",
-        Trust::Autopilot => "autopilot",
+        audit.record(record);
     }
 }
 
@@ -528,8 +558,22 @@ mod tests {
         let id = submit(&s, "echo");
         assert_eq!(finished(&mut events, id).await, JobState::Done);
         let info = s.get(id).unwrap();
-        assert_eq!(info.tail, ["one", "two", "three"]);
+        assert_eq!(s.tail(id).unwrap(), ["one", "two", "three"]);
         assert!(info.started.is_some() && info.finished.is_some());
+        assert_eq!(s.active(), 0);
+    }
+
+    #[tokio::test]
+    async fn old_finished_jobs_are_dropped() {
+        let s = scheduler("");
+        let mut events = s.subscribe();
+        let ids: Vec<JobId> = (0..KEEP_FINISHED + 5).map(|_| submit(&s, "echo")).collect();
+        while s.active() > 0 {
+            let _ = events.recv().await;
+        }
+        let kept = s.list();
+        assert_eq!(kept.len(), KEEP_FINISHED);
+        assert_eq!(kept.first().map(|job| job.id), Some(ids[5]));
     }
 
     #[tokio::test]
@@ -577,7 +621,7 @@ mod tests {
         let mut events = s.subscribe();
         let id = submit(&s, "echo");
         finished(&mut events, id).await;
-        assert!(s.get(id).unwrap().tail.is_empty());
+        assert!(s.tail(id).unwrap().is_empty());
     }
 
     #[tokio::test]

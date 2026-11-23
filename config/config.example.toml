@@ -1,6 +1,6 @@
-# assist configuration — Phase 0 subset.
-# Only sections the current phase reads are accepted; unknown keys are errors (typos never
-# pass silently). Sections from PLAN.md §6 are added as their phases land.
+# assist configuration example.
+# Only sections assist reads are accepted; unknown keys are errors, so typos never pass
+# silently.
 
 config_version = 1
 
@@ -22,6 +22,9 @@ dad = "+910000000001"
 ask.text = "What should the message say?"   # overrides the phrase file's question
 risky = true
 
-# Overrides of the default policy table (PLAN.md §3.6). Dotted capability names need quotes.
+[search]
+url = "https://duckduckgo.com/?q={query}"
+
+# Overrides of the default policy table (PLAN.md section 3.6). Dotted capability names need quotes.
 [policy]
 shell = { owner_remote = "deny" }

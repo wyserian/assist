@@ -1,7 +1,7 @@
-//! Config loading and validation (PLAN.md §6).
+//! Config loading and validation (PLAN.md section 6).
 //!
 //! Only the sections the current phase uses are accepted; unknown keys are errors so typos
-//! (`[contcts]`) never pass silently. Sections are added as their phases land.
+//! (`[contcts]`) never pass silently.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -36,7 +36,7 @@ pub struct Config {
     /// Per-command settings, keyed by command name.
     #[serde(default)]
     pub commands: BTreeMap<String, CommandConfig>,
-    /// Overrides of the default policy table (PLAN.md §3.6).
+    /// Overrides of the default policy table (PLAN.md section 3.6).
     #[serde(default)]
     pub policy: PolicyOverrides,
     /// How many jobs may run at once per lane.
@@ -45,9 +45,28 @@ pub struct Config {
     /// Job limits.
     #[serde(default)]
     pub jobs: JobsConfig,
+    /// Web search.
+    #[serde(default)]
+    pub search: SearchConfig,
 }
 
-/// `[lanes]`: concurrent jobs per lane (PLAN.md §3.8).
+/// `[search]`: the search engine.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct SearchConfig {
+    /// An `http(s)://` URL with `{query}` where the encoded query goes.
+    pub url: String,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            url: "https://duckduckgo.com/?q={query}".to_owned(),
+        }
+    }
+}
+
+/// `[lanes]`: concurrent jobs per lane (PLAN.md section 3.8).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct LanesConfig {
@@ -178,6 +197,14 @@ impl Config {
                 "[lanes] values must be at least 1".to_owned(),
             ));
         }
+        // Only web URLs: the URL is handed to the OS "open" handler.
+        let url = &config.search.url;
+        let web = url.starts_with("https://") || url.starts_with("http://");
+        if !web || !url.contains("{query}") {
+            return Err(ConfigError::Invalid(
+                "[search] url must start with https:// or http:// and contain {query}".to_owned(),
+            ));
+        }
         Ok(config)
     }
 
@@ -292,6 +319,22 @@ mod tests {
         ));
         assert_eq!(parse_duration("2h"), Some(Duration::from_secs(7200)));
         assert_eq!(parse_duration("10"), None);
+    }
+
+    #[test]
+    fn search_url_must_be_a_web_url_with_a_query() {
+        assert!(Config::from_toml("[search]\nurl = \"https://x.org/?q={query}\"\n").is_ok());
+        for bad in [
+            "file:///c:/x?{query}",
+            "https://x.org/",
+            "javascript:{query}",
+        ] {
+            let src = format!("[search]\nurl = \"{bad}\"\n");
+            assert!(
+                matches!(Config::from_toml(&src), Err(ConfigError::Invalid(_))),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

@@ -1,4 +1,5 @@
-//! Who may do what (PLAN.md §3.4, §3.6): a capability × trust table with config overrides.
+//! Who may do what (PLAN.md sections 3.4 and 3.6): a capability x trust table with config
+//! overrides.
 //!
 //! Actions never decide about confirmation themselves; they declare capabilities and the
 //! policy decides from the table, `risky` and how the request was made.
@@ -21,6 +22,19 @@ pub enum Trust {
     Untrusted,
     /// Standing autopilot goals, running unattended.
     Autopilot,
+}
+
+impl Trust {
+    /// The config and audit-log name, e.g. `owner_remote`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::OwnerRemote => "owner_remote",
+            Self::Voice => "voice",
+            Self::Untrusted => "untrusted",
+            Self::Autopilot => "autopilot",
+        }
+    }
 }
 
 /// Who a request comes from.
@@ -120,7 +134,7 @@ pub struct Request<'a> {
     pub typed: bool,
 }
 
-/// The capability × trust table with overrides applied.
+/// The capability x trust table with overrides applied.
 #[derive(Debug, Clone)]
 pub struct Policy {
     table: BTreeMap<(Capability, Trust), Decision>,
@@ -131,11 +145,11 @@ pub struct Policy {
 use Capability as C;
 use Decision::{Allow, Confirm, Deny};
 
-/// Defaults from PLAN.md §3.6, columns: local, owner_remote, voice, untrusted, autopilot.
+/// Defaults from PLAN.md section 3.6, columns: local, owner_remote, voice, untrusted, autopilot.
 /// Local shell is `Confirm` here; `decide` allows a typed local `$ cmd`.
 ///
-/// shortcut: voice "confirm on screen" and the autopilot path/recipient scopes are plain
-/// `Confirm` until voice (Phase 2) and autopilot (Phase 3) exist.
+/// shortcut: "confirm on screen" for voice and the autopilot path and recipient scopes are a
+/// plain `Confirm`; split them out when voice and autopilot actions exist.
 const DEFAULTS: [(Capability, [Decision; 5]); 12] = [
     (C::Read, [Allow, Allow, Allow, Confirm, Allow]),
     (C::Apps, [Allow, Allow, Allow, Confirm, Allow]),

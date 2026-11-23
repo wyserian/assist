@@ -32,10 +32,24 @@ stack, phases and security rules. Work on the current phase only.
 - Rust stable, edition 2021+. `thiserror` in libraries, `anyhow` in binaries.
 - No `unwrap()` / `expect()` outside tests and `main` setup.
 - `cargo fmt` and `cargo clippy --all-targets --all-features -- -D warnings` must pass.
-- OS-specific code via `#[cfg(target_os = "...")]` in separate modules (`*_linux.rs`,
+- OS-specific code via `#[cfg(...)]` in separate modules (`*_unix.rs` / `*_linux.rs`,
   `*_windows.rs`, `*_android.rs`).
 - `panic = "unwind"` (never `abort`) in daemon and Android builds.
 - Small modules, clear names, doc comments on public items. No dead code "for later".
+- **Reusable:** one shared helper instead of copies; put a type's name/format logic on the type.
+- **Optimized:** no clones or allocations on repeated paths without need; every buffer, queue,
+  history and input line has a bound.
+- **Extensible:** new behaviour plugs in through traits, features and config, not by editing
+  the core.
+- **Comments:** describe what the code is and why, in the present tense. No change history
+  ("now", "added", "new"), no "until Phase X" / TODO follow-ups. A real known limit gets one
+  line: `shortcut: <limit>, <when to upgrade>`.
+- **Plain output:** everything users see (CLI, UI, replies, logs) uses plain ASCII punctuation:
+  no em/en dashes, arrows, ellipsis characters or curly quotes, and plain wording. Same for
+  code comments.
+- **Secure:** validate at trust boundaries, least privilege (user-only files), bounded input.
+- **Dependencies:** maintained, permissively licensed, on current versions; `cargo deny` clean.
+  Before a push or release, re-audit: dependency updates, advisories, CI action pins, comments.
 
 ## Testing
 

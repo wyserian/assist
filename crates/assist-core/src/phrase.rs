@@ -1,4 +1,4 @@
-//! Phrase syntax (PLAN.md §3.7): `a|b` alternatives, `( )` groups, `?` optional,
+//! Phrase syntax (PLAN.md section 3.7): `a|b` alternatives, `( )` groups, `?` optional,
 //! `.name.` slots. Words are separated by spaces.
 //!
 //! Parsed by hand: the grammar is a few rules, so a parser library would add more than it saves.

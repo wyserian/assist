@@ -1,4 +1,4 @@
-//! Built-in actions (PLAN.md §3.9). Each lives behind its own Cargo feature; removing one
+//! Built-in actions (PLAN.md section 3.9). Each lives behind its own Cargo feature; removing one
 //! never changes the core.
 
 use std::sync::Arc;

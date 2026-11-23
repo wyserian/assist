@@ -1,4 +1,4 @@
-//! The plugin contract every action implements (PLAN.md §3.9).
+//! The plugin contract every action implements (PLAN.md section 3.9).
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -17,7 +17,7 @@ use crate::scheduler::JobId;
 /// A boxed, sendable future, as returned by [`Action::run`].
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
-/// Data flowing into an action (the previous pipe stage; empty until pipes, Phase 3).
+/// Data flowing into an action from the previous pipe stage; closed when there is none.
 pub type Input = mpsc::Receiver<Chunk>;
 
 /// Where an action streams its output. Bounded, so a fast producer waits for slow readers.
@@ -36,7 +36,7 @@ pub enum Chunk {
     Cwd(PathBuf),
 }
 
-/// Scheduler lane (PLAN.md §3.8). A background job never delays an interactive one.
+/// Scheduler lane (PLAN.md section 3.8). A background job never delays an interactive one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Lane {
@@ -44,6 +44,16 @@ pub enum Lane {
     Interactive,
     /// Long jobs: builds, scans, scrapes.
     Background,
+}
+
+impl Lane {
+    /// The config name, e.g. `background`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Interactive => "interactive",
+            Self::Background => "background",
+        }
+    }
 }
 
 /// What an action is and needs. The core refuses capabilities that are not declared.

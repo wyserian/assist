@@ -3,9 +3,11 @@
 use process_wrap::tokio::{CommandWrap, ProcessGroup};
 use tokio::process::Command;
 
+use super::on_path;
+
 /// `bash` if installed, else `sh`.
 pub(crate) fn shell_command(script: &str) -> Command {
-    let program = if which("bash") { "bash" } else { "sh" };
+    let program = if on_path("bash") { "bash" } else { "sh" };
     let mut command = Command::new(program);
     command.args(["-c", script]);
     command
@@ -13,9 +15,4 @@ pub(crate) fn shell_command(script: &str) -> Command {
 
 pub(super) fn contain(wrap: &mut CommandWrap) {
     wrap.wrap(ProcessGroup::leader());
-}
-
-fn which(program: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }

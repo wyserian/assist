@@ -37,7 +37,7 @@ fn shell_runs_commands_and_audits_them() {
         "[#1] hello",
         "[#2] run_script: script = hello",
         "[#2] built",
-        "Run `make me a sandwich` in the shell? (yes/no)",
+        "Run \"make me a sandwich\" in the shell? (yes/no)",
         "Okay, not doing that.",
         "No running job #99.",
         "[#1] done",

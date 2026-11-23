@@ -40,7 +40,7 @@ const DEFAULT_EN: [(&str, &str); 5] = [
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommandSpec {
-    /// Slot name → type: `text`, `number` or `list:<name>`.
+    /// Slot name -> type: `text`, `number` or `list:<name>`.
     #[serde(default)]
     pub slots: BTreeMap<String, String>,
     /// Phrases in the syntax of [`crate::phrase`].

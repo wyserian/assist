@@ -1,13 +1,13 @@
-//! Append-only audit log (PLAN.md §9): one JSON object per line in `audit/YYYY-MM.jsonl`.
+//! Append-only audit log (PLAN.md section 9): one JSON object per line in `audit/YYYY-MM.jsonl`.
 //!
 //! Each line carries `prev` (the previous line's hash) and `hash` (SHA-256 of the line without
 //! `hash`), so editing or deleting a line breaks the chain and [`verify`] finds it.
 //!
-//! shortcut: each month's file starts a new chain, so deleting a whole month file is not
-//! detected; anchor the first hash to the previous month when sync/export arrives (Phase 5).
-//! shortcut: secret values are not redacted yet; that lands with the secret store (Phase 1b).
+//! shortcut: each month file starts its own chain, so deleting a whole month file is not
+//! detected; anchor each file to the previous one when logs are exported or synced.
+//! shortcut: secret values in titles are not redacted; redact them once secrets are stored.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -16,6 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+
+use crate::private_fs;
 
 /// `prev` of the first line in a file.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -62,7 +64,7 @@ struct Writer {
 impl Audit {
     /// Opens (or creates) the audit directory.
     pub fn open(dir: &Path) -> io::Result<Self> {
-        fs::create_dir_all(dir)?;
+        private_fs::create_dir(dir)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(Writer {
                 dir: dir.to_owned(),
@@ -92,7 +94,7 @@ impl Audit {
         if writer.file.is_none() || writer.month != month {
             let path = writer.dir.join(format!("{month}.jsonl"));
             writer.prev = last_hash(&path)?.unwrap_or_else(|| GENESIS.to_owned());
-            writer.file = Some(OpenOptions::new().create(true).append(true).open(path)?);
+            writer.file = Some(private_fs::open_append(&path)?);
             writer.month = month;
         }
         let mut value = serde_json::to_value(record)?;
@@ -207,6 +209,7 @@ fn month_of(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn record(job: u64, event: &str) -> AuditRecord {
         AuditRecord {

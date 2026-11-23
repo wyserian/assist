@@ -3,9 +3,11 @@
 use process_wrap::tokio::{CommandWrap, JobObject};
 use tokio::process::Command;
 
+use super::on_path;
+
 /// `pwsh` (PowerShell 7) if installed, else Windows PowerShell. No profile, never prompts.
 pub(crate) fn shell_command(script: &str) -> Command {
-    let program = if which("pwsh.exe") {
+    let program = if on_path("pwsh.exe") {
         "pwsh"
     } else {
         "powershell"
@@ -23,9 +25,4 @@ pub(crate) fn shell_command(script: &str) -> Command {
 
 pub(super) fn contain(wrap: &mut CommandWrap) {
     wrap.wrap(JobObject);
-}
-
-fn which(program: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }

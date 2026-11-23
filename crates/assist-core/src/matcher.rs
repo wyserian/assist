@@ -1,4 +1,4 @@
-//! Text → [`Intent`] (PLAN.md §3.7).
+//! Text -> [`Intent`] (PLAN.md section 3.7).
 //!
 //! [`RuleMatcher`] compiles every phrase to an anchored regex. A [`RegexSet`] finds the
 //! candidate phrases in one pass; slots are then resolved by type. When several phrases match,
@@ -14,9 +14,9 @@ use crate::normalize::{normalize, parse_number};
 use crate::phrase::{self, Node, SyntaxError};
 use crate::phrases::PhraseSet;
 
-/// Minimum similarity (0–1) for a fuzzy `list:` slot match, e.g. "firfox" → "firefox".
+/// Minimum similarity (0 to 1) for a fuzzy `list:` slot match, e.g. "firfox" -> "firefox".
 const FUZZY_MIN: f64 = 0.8;
-/// Similarity when the input is the leading or trailing whole words of a value ("sam" → "sam lee").
+/// Similarity when the input is the leading or trailing whole words of a value ("sam" -> "sam lee").
 const PARTIAL_SCORE: f64 = 0.9;
 /// Candidates this close to the best one count as ambiguous ("sam lee" vs "sam roy").
 const AMBIGUITY_MARGIN: f64 = 0.05;
@@ -26,15 +26,15 @@ const AMBIGUITY_MARGIN: f64 = 0.05;
 pub struct Intent {
     /// Command name, e.g. `send_sms`.
     pub command: String,
-    /// Slot name → value. `list:` slots hold the config key (the best candidate if
+    /// Slot name -> value. `list:` slots hold the config key (the best candidate if
     /// ambiguous), `number` slots digits.
     pub slots: BTreeMap<String, String>,
     /// `list:` slots with several equally good candidates, best first; the dialog asks.
     pub ambiguous: BTreeMap<String, Vec<String>>,
 }
 
-/// Anything that turns text into an intent. The semantic and LLM stages (Phases 2 and 7)
-/// implement this too, so callers never change.
+/// Anything that turns text into an intent. Semantic and LLM matchers implement it too, so
+/// callers never change.
 pub trait Matcher: Send + Sync {
     /// The best intent for `text`, or `None` if nothing matches.
     fn best(&self, text: &str) -> Option<Intent>;
@@ -65,7 +65,7 @@ pub enum BuildError {
         source: SyntaxError,
     },
     /// A phrase uses `.slot.` without declaring it in `slots`.
-    #[error("{command}: slot .{slot}. is used but not declared in `slots`")]
+    #[error("{command}: slot .{slot}. is used but not declared in slots")]
     UndeclaredSlot {
         /// Command the phrase belongs to.
         command: String,
@@ -118,9 +118,9 @@ struct Extracted {
 pub struct RuleMatcher {
     set: RegexSet,
     phrases: Vec<CompiledPhrase>,
-    /// Command → slot → type.
+    /// Command -> slot -> type.
     types: BTreeMap<String, BTreeMap<String, SlotType>>,
-    /// List name → (normalized value, config key).
+    /// List name -> (normalized value, config key).
     lists: BTreeMap<String, Vec<(String, String)>>,
 }
 
@@ -265,7 +265,7 @@ impl Matcher for RuleMatcher {
     }
 }
 
-/// How close normalized `value` is to normalized list `entry`, 0–1.
+/// How close normalized `value` is to normalized list `entry`, 0 to 1.
 fn similarity(entry: &str, value: &str) -> f64 {
     if entry == value {
         return 1.0;

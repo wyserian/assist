@@ -1,15 +1,19 @@
-//! Unix: starts the program directly, detached from our stdio.
-//!
-//! shortcut: the child is not waited on, so it stays a zombie entry after it exits until the
-//! daemon exits; reap it from a background task when the daemon is long-running (Phase 1b).
+//! Unix: starts the program directly, detached from our stdio. A small thread waits for it,
+//! so it leaves no zombie process when it exits.
 
 use std::process::{Command, Stdio};
 
 pub(super) fn launch(program: &str) -> std::io::Result<()> {
-    Command::new(program)
+    let mut child = Command::new(program)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
-        .map(drop)
+        .spawn()?;
+    std::thread::Builder::new()
+        .name("assist-app-reaper".to_owned())
+        .stack_size(64 * 1024)
+        .spawn(move || {
+            let _ = child.wait();
+        })?;
+    Ok(())
 }
