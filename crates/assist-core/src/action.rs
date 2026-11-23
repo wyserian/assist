@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -36,25 +35,7 @@ pub enum Chunk {
     Cwd(PathBuf),
 }
 
-/// Scheduler lane (PLAN.md section 3.8). A background job never delays an interactive one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Lane {
-    /// Quick, user-facing jobs.
-    Interactive,
-    /// Long jobs: builds, scans, scrapes.
-    Background,
-}
-
-impl Lane {
-    /// The config name, e.g. `background`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Interactive => "interactive",
-            Self::Background => "background",
-        }
-    }
-}
+pub use assist_proto::Lane;
 
 /// What an action is and needs. The core refuses capabilities that are not declared.
 #[derive(Debug, Clone)]

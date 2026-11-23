@@ -1,0 +1,18 @@
+[package]
+name = "assist-proto"
+description = "Wire format shared by every assist client and node."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid = { workspace = true, features = ["serde", "v4"] }
+
+[lints]
+workspace = true

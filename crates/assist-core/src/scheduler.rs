@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
-use serde::Serialize;
 use tokio::sync::{broadcast, mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
 
@@ -30,42 +29,7 @@ pub const KEEP_FINISHED: usize = 100;
 const OUTPUT_BUFFER: usize = 256;
 const EVENT_BUFFER: usize = 1024;
 
-/// Where a job is in its life.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum JobState {
-    /// Waiting for a lane slot.
-    Queued,
-    /// Running.
-    Running,
-    /// Finished successfully.
-    Done,
-    /// The action reported an error.
-    Failed,
-    /// Stopped by the user.
-    Cancelled,
-    /// Stopped after `[jobs] timeout`.
-    TimedOut,
-}
-
-impl JobState {
-    /// Whether the job has ended.
-    pub fn is_finished(self) -> bool {
-        !matches!(self, Self::Queued | Self::Running)
-    }
-
-    /// Lowercase name, as used in the audit log and `jobs` listings.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Done => "done",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::TimedOut => "timed_out",
-        }
-    }
-}
+pub use assist_proto::JobState;
 
 /// A job as listed by `jobs`.
 #[derive(Debug, Clone)]

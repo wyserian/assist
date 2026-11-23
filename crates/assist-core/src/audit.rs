@@ -11,7 +11,6 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -157,12 +156,7 @@ pub fn verify(path: &Path) -> Result<usize, VerifyError> {
     Ok(count)
 }
 
-/// Current Unix time in milliseconds.
-pub fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-}
+pub use assist_proto::now_ms;
 
 fn hash_of(fields: &Map<String, Value>) -> io::Result<String> {
     // serde_json maps are sorted, so the serialization is canonical.
