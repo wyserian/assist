@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/assist-core"]
+members = ["crates/assist-core", "crates/assist-actions"]
 
 [workspace.package]
 version = "0.1.0"
@@ -8,9 +8,13 @@ edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/wyserian/assist"
+publish = false
 
 [workspace.dependencies]
+assist-core = { path = "crates/assist-core" }
 insta = "1"
+open = "5"
+process-wrap = { version = "10", default-features = false }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
