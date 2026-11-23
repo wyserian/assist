@@ -1,6 +1,6 @@
 [package]
 name = "assist-core"
-description = "Text-only core of assist: config, phrases and the rule matcher."
+description = "Text-only core of assist: config, phrases, matcher, dialog, policy, jobs."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,12 +10,17 @@ repository.workspace = true
 [dependencies]
 regex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 strsim.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-util.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lints]
 workspace = true

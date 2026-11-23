@@ -69,7 +69,7 @@ pub enum EngineError {
 /// Everything conversations share: config, matcher, policy and the available commands.
 #[derive(Debug)]
 pub struct Engine {
-    config: Config,
+    config: Arc<Config>,
     matcher: RuleMatcher,
     policy: Policy,
     commands: BTreeMap<String, CommandInfo>,
@@ -82,7 +82,7 @@ impl Engine {
     /// Builds the engine. `commands` are the commands this device can run; `offer_shell`
     /// offers unmatched input as a shell command (desktop).
     pub fn new(
-        config: Config,
+        config: Arc<Config>,
         phrases: &PhraseSet,
         commands: BTreeMap<String, CommandInfo>,
         offer_shell: bool,
@@ -638,7 +638,7 @@ risky = true
     }
 
     fn engine(offer_shell: bool, commands: BTreeMap<String, CommandInfo>) -> Arc<Engine> {
-        let config = Config::from_toml(CONFIG).unwrap();
+        let config = Arc::new(Config::from_toml(CONFIG).unwrap());
         let phrases = PhraseSet::default_en().unwrap();
         Arc::new(Engine::new(config, &phrases, commands, offer_shell).unwrap())
     }

@@ -5,8 +5,10 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use serde::Deserialize;
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer};
 
 use crate::dialog::SHELL;
 use crate::phrases::PhraseSet;
@@ -37,6 +39,68 @@ pub struct Config {
     /// Overrides of the default policy table (PLAN.md §3.6).
     #[serde(default)]
     pub policy: PolicyOverrides,
+    /// How many jobs may run at once per lane.
+    #[serde(default)]
+    pub lanes: LanesConfig,
+    /// Job limits.
+    #[serde(default)]
+    pub jobs: JobsConfig,
+}
+
+/// `[lanes]`: concurrent jobs per lane (PLAN.md §3.8).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LanesConfig {
+    /// Quick, user-facing jobs.
+    pub interactive: usize,
+    /// Long jobs: builds, scans, scrapes.
+    pub background: usize,
+}
+
+impl Default for LanesConfig {
+    fn default() -> Self {
+        Self {
+            interactive: 2,
+            background: 3,
+        }
+    }
+}
+
+/// `[jobs]`: per-job limits.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct JobsConfig {
+    /// A running job is stopped after this long, e.g. `"10m"`.
+    #[serde(deserialize_with = "duration")]
+    pub timeout: Duration,
+    /// Output kept per job for `jobs` listings; older lines are dropped.
+    pub output_tail_kb: usize,
+}
+
+impl Default for JobsConfig {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(600),
+            output_tail_kb: 64,
+        }
+    }
+}
+
+/// Parses `30s`, `10m` or `2h`.
+pub fn parse_duration(text: &str) -> Option<Duration> {
+    let text = text.trim();
+    let (digits, unit) = [('s', 1), ('m', 60), ('h', 3600)]
+        .into_iter()
+        .find_map(|(suffix, secs)| text.strip_suffix(suffix).map(|d| (d, secs)))?;
+    let n: u64 = digits.parse().ok()?;
+    Some(Duration::from_secs(n.checked_mul(unit)?))
+}
+
+fn duration<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    parse_duration(&text).ok_or_else(|| {
+        D::Error::custom(format!("invalid duration {text:?}; use e.g. 30s, 10m, 2h"))
+    })
 }
 
 /// Settings for one command (`[commands.<name>]`).
@@ -83,6 +147,9 @@ pub enum ConfigError {
     /// A `[commands.<name>]` section names a command no phrase file defines.
     #[error("[commands.{0}] does not match any known command")]
     UnknownCommand(String),
+    /// A value is well-formed but not allowed.
+    #[error("{0}")]
+    Invalid(String),
 }
 
 fn current_version() -> u32 {
@@ -105,6 +172,11 @@ impl Config {
                 found: config.config_version,
                 expected: CURRENT_VERSION,
             });
+        }
+        if config.lanes.interactive == 0 || config.lanes.background == 0 {
+            return Err(ConfigError::Invalid(
+                "[lanes] values must be at least 1".to_owned(),
+            ));
         }
         Ok(config)
     }
@@ -201,6 +273,25 @@ mod tests {
         let phrases = PhraseSet::default_en().unwrap();
         let err = config.validate_commands(&phrases).unwrap_err();
         assert!(matches!(err, ConfigError::UnknownCommand(ref name) if name == "sned_sms"));
+    }
+
+    #[test]
+    fn job_limits_parse_and_validate() {
+        let config =
+            Config::from_toml("[lanes]\ninteractive = 1\n[jobs]\ntimeout = \"90s\"\n").unwrap();
+        assert_eq!(config.lanes.interactive, 1);
+        assert_eq!(config.lanes.background, 3);
+        assert_eq!(config.jobs.timeout, Duration::from_secs(90));
+        assert!(matches!(
+            Config::from_toml("[lanes]\nbackground = 0\n"),
+            Err(ConfigError::Invalid(_))
+        ));
+        assert!(matches!(
+            Config::from_toml("[jobs]\ntimeout = \"soon\"\n"),
+            Err(ConfigError::Parse { line: 2, .. })
+        ));
+        assert_eq!(parse_duration("2h"), Some(Duration::from_secs(7200)));
+        assert_eq!(parse_duration("10"), None);
     }
 
     #[test]
