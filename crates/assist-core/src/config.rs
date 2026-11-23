@@ -4,6 +4,7 @@
 //! (`[contcts]`) never pass silently.
 
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -48,6 +49,25 @@ pub struct Config {
     /// Web search.
     #[serde(default)]
     pub search: SearchConfig,
+    /// The local daemon.
+    #[serde(default)]
+    pub server: ServerConfig,
+}
+
+/// `[server]`: where `assist serve` listens.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ServerConfig {
+    /// A loopback address and port; other interfaces are refused.
+    pub bind: SocketAddr,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            bind: SocketAddr::from(([127, 0, 0, 1], 7720)),
+        }
+    }
 }
 
 /// `[search]`: the search engine.
@@ -211,6 +231,11 @@ impl Config {
                 "[search] url must start with https:// or http:// and contain {query}".to_owned(),
             ));
         }
+        if !config.server.bind.ip().is_loopback() {
+            return Err(ConfigError::Invalid(
+                "[server] bind must be a loopback address such as 127.0.0.1:7720".to_owned(),
+            ));
+        }
         Ok(config)
     }
 
@@ -325,6 +350,25 @@ mod tests {
         ));
         assert_eq!(parse_duration("2h"), Some(Duration::from_secs(7200)));
         assert_eq!(parse_duration("10"), None);
+    }
+
+    #[test]
+    fn server_binds_to_loopback_only() {
+        assert_eq!(Config::from_toml("").unwrap().server.bind.port(), 7720);
+        assert!(Config::from_toml(
+            "[server]
+bind = \"[::1]:8000\"
+"
+        )
+        .is_ok());
+        assert!(matches!(
+            Config::from_toml(
+                "[server]
+bind = \"0.0.0.0:7720\"
+"
+            ),
+            Err(ConfigError::Invalid(_))
+        ));
     }
 
     #[test]

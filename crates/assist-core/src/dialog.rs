@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use assist_proto::rpc::Explanation;
+
 use crate::config::{Config, ConfigError};
 use crate::matcher::{BuildError, Intent, Matcher, RuleMatcher, SlotType};
 use crate::normalize::{normalize, parse_number};
@@ -112,6 +114,34 @@ impl Engine {
     /// The config the engine was built from.
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// What `text` would do for `principal`, without asking or running anything; `None` if
+    /// it matches no command.
+    pub fn explain(&self, principal: &Principal, text: &str) -> Option<Explanation> {
+        let text = text.trim();
+        let (plan, ambiguous) = match text.strip_prefix('$') {
+            Some(command) => (Plan::shell(command.trim(), true), BTreeMap::new()),
+            None => {
+                let intent = self.matcher.best(text)?;
+                let plan = Plan {
+                    command: intent.command,
+                    slots: intent.slots,
+                    typed: false,
+                };
+                (plan, intent.ambiguous)
+            }
+        };
+        let decision = self
+            .decision(principal, &plan)
+            .map_or("unavailable", Decision::as_str);
+        Some(Explanation {
+            readback: self.readback(&plan),
+            command: plan.command,
+            slots: plan.slots,
+            ambiguous,
+            decision: decision.to_owned(),
+        })
     }
 
     /// The fully resolved action as one line, for confirmation and logs.
@@ -719,6 +749,35 @@ risky = true
         insta::assert_snapshot!(
             "unavailable",
             transcript(engine(true, fewer), &["call dad"])
+        );
+    }
+
+    #[test]
+    fn explain_matches_without_running() {
+        let engine = engine(true, commands());
+        let owner = Principal::local("cli");
+        let call = engine.explain(&owner, "call sam").unwrap();
+        assert_eq!(
+            (call.command.as_str(), call.decision.as_str()),
+            ("call", "confirm")
+        );
+        assert_eq!(call.ambiguous["contact"], ["sam lee", "sam roy"]);
+        let shell = engine.explain(&owner, "$ ls").unwrap();
+        assert_eq!(
+            (shell.readback.as_str(), shell.decision.as_str()),
+            ("$ ls", "allow")
+        );
+        assert!(engine.explain(&owner, "fly to the moon").is_none());
+        let fewer = super::Engine::new(
+            Arc::new(Config::from_toml(CONFIG).unwrap()),
+            &PhraseSet::default_en().unwrap(),
+            BTreeMap::new(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            fewer.explain(&owner, "call dad").unwrap().decision,
+            "unavailable"
         );
     }
 

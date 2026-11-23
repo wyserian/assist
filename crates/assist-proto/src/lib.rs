@@ -14,6 +14,7 @@ pub use uuid::Uuid;
 
 mod body;
 mod job;
+pub mod rpc;
 
 pub use body::{
     Hello, JobBrief, JobSummary, JobUpdate, Reply, Rpc, RpcError, RpcResult, Stream, Subscribe,

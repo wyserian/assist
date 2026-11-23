@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// How much a request's origin is trusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
@@ -101,7 +101,7 @@ pub enum Capability {
 }
 
 /// The policy's answer. Ordered from least to most strict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Decision {
     /// Run without asking.
@@ -110,6 +110,17 @@ pub enum Decision {
     Confirm,
     /// Refuse.
     Deny,
+}
+
+impl Decision {
+    /// The config and wire name, e.g. `confirm`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Confirm => "confirm",
+            Self::Deny => "deny",
+        }
+    }
 }
 
 /// `[policy]` in config: per capability, per trust level, a decision that replaces the default.

@@ -1,0 +1,236 @@
+//! The assist daemon's front door (PLAN.md sections 3.3, 3.15 and 9).
+//!
+//! One WebSocket endpoint (`/ws`) speaks the [`assist_proto`] envelopes; `/auth` swaps a
+//! one-time code for a browser session. Every request passes [`guard`] first: the `Host` and
+//! `Origin` checks, then strict security headers on the response. Each connection has its
+//! own dialog, so questions and confirmations never mix between clients.
+
+use std::collections::BTreeMap;
+use std::future::Future;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use assist_core::dialog::Engine;
+use assist_core::scheduler::Scheduler;
+use assist_core::secrets::Secrets;
+use assist_core::store::Store;
+use assist_proto::rpc::{ClientEntry, Otp};
+use assist_proto::MAX_FRAME;
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{Request, State};
+use axum::http::header::{
+    CACHE_CONTROL, CONTENT_SECURITY_POLICY, REFERRER_POLICY, SET_COOKIE, X_CONTENT_TYPE_OPTIONS,
+};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
+
+mod auth;
+mod conn;
+mod rpc;
+
+pub use auth::{load_or_create_token, Credential};
+use auth::{Auth, Refusal};
+
+const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; \
+                   connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+/// What the daemon serves.
+pub struct Services {
+    /// Runs jobs.
+    pub scheduler: Scheduler,
+    /// Matcher, policy and available commands.
+    pub engine: Arc<Engine>,
+    /// Job history.
+    pub store: Store,
+    /// Secrets, if a keystore is available.
+    pub secrets: Option<Arc<Secrets>>,
+    /// Working directory for shell jobs of clients that do not send one.
+    pub default_cwd: PathBuf,
+    /// Where the token file lives.
+    pub data_dir: PathBuf,
+}
+
+/// Serves `listener` until `shutdown` completes. The listener must be on a loopback address.
+pub async fn serve(
+    services: Services,
+    listener: TcpListener,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    let port = listener.local_addr()?.port();
+    let auth = Auth::open(&services.data_dir)?;
+    let stop = CancellationToken::new();
+    let state = AppState(Arc::new(Shared {
+        services,
+        auth,
+        port,
+        clients: Mutex::new(BTreeMap::new()),
+        next_client: AtomicU64::new(1),
+        stop: stop.clone(),
+    }));
+    let app = Router::new()
+        .route("/", get(index))
+        .route("/ws", get(websocket))
+        .route("/auth", post(sign_in))
+        .layer(middleware::from_fn_with_state(state.clone(), guard))
+        .with_state(state);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            // Close every WebSocket too; graceful shutdown waits for them.
+            stop.cancel();
+        })
+        .await
+}
+
+/// Shared by every request handler.
+#[derive(Clone)]
+pub(crate) struct AppState(Arc<Shared>);
+
+pub(crate) struct Shared {
+    pub(crate) services: Services,
+    pub(crate) auth: Auth,
+    port: u16,
+    clients: Mutex<BTreeMap<u64, Client>>,
+    next_client: AtomicU64,
+    stop: CancellationToken,
+}
+
+struct Client {
+    entry: ClientEntry,
+    cancel: CancellationToken,
+    session: Option<String>,
+}
+
+impl std::ops::Deref for AppState {
+    type Target = Shared;
+    fn deref(&self) -> &Shared {
+        &self.0
+    }
+}
+
+impl Shared {
+    fn clients(&self) -> MutexGuard<'_, BTreeMap<u64, Client>> {
+        self.clients.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Registers a connection; its token is cancelled on revoke or shutdown.
+    pub(crate) fn connect(&self, credential: &Credential) -> (u64, CancellationToken) {
+        let id = self.next_client.fetch_add(1, Ordering::Relaxed);
+        let cancel = self.stop.child_token();
+        let (kind, session) = match credential {
+            Credential::Token => ("cli", None),
+            Credential::Session(session) => ("web", Some(session.clone())),
+        };
+        let entry = ClientEntry {
+            id,
+            kind: kind.to_owned(),
+            client: String::new(),
+            connected: assist_proto::now_ms(),
+        };
+        self.clients().insert(
+            id,
+            Client {
+                entry,
+                cancel: cancel.clone(),
+                session,
+            },
+        );
+        (id, cancel)
+    }
+
+    pub(crate) fn name_client(&self, id: u64, name: &str) {
+        if let Some(client) = self.clients().get_mut(&id) {
+            client.entry.client = name.chars().take(64).collect();
+        }
+    }
+
+    pub(crate) fn disconnect(&self, id: u64) {
+        self.clients().remove(&id);
+    }
+
+    pub(crate) fn client_list(&self) -> Vec<ClientEntry> {
+        self.clients().values().map(|c| c.entry.clone()).collect()
+    }
+
+    /// Closes a connection and ends its browser session.
+    pub(crate) fn revoke(&self, id: u64) -> bool {
+        let Some(client) = self.clients().remove(&id) else {
+            return false;
+        };
+        client.cancel.cancel();
+        if let Some(session) = client.session {
+            self.auth.end_session(&session);
+        }
+        true
+    }
+}
+
+/// Refuses requests that do not name this daemon or come from another site, and adds
+/// security headers to every response.
+async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let headers = request.headers();
+    if !auth::host_ok(headers, state.port) {
+        return (StatusCode::MISDIRECTED_REQUEST, "wrong host").into_response();
+    }
+    if !auth::origin_ok(headers, state.port) {
+        return (StatusCode::FORBIDDEN, "cross-site request").into_response();
+    }
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+async fn index() -> &'static str {
+    "assist daemon. Open the dashboard with: assist ui\n"
+}
+
+async fn websocket(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    match state.auth.check(&headers) {
+        Ok(credential) => upgrade
+            .max_message_size(MAX_FRAME)
+            .on_upgrade(move |socket| conn::run(state, socket, credential)),
+        Err(refusal) => refused(refusal),
+    }
+}
+
+/// Swaps a one-time code (`{"code": "..."}`) for a session cookie.
+async fn sign_in(State(state): State<AppState>, Json(otp): Json<Otp>) -> Response {
+    match state.auth.redeem(&otp.code) {
+        Ok(session) => {
+            let cookie = format!(
+                "{}={session}; HttpOnly; SameSite=Strict; Path=/",
+                auth::COOKIE_NAME
+            );
+            match HeaderValue::from_str(&cookie) {
+                Ok(value) => (StatusCode::NO_CONTENT, [(SET_COOKIE, value)]).into_response(),
+                Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            }
+        }
+        Err(refusal) => refused(refusal),
+    }
+}
+
+fn refused(refusal: Refusal) -> Response {
+    match refusal {
+        Refusal::Unauthorized => {
+            (StatusCode::UNAUTHORIZED, "sign in with: assist ui").into_response()
+        }
+        Refusal::TooMany => {
+            (StatusCode::TOO_MANY_REQUESTS, "too many failed attempts").into_response()
+        }
+    }
+}

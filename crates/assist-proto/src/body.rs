@@ -12,6 +12,9 @@ pub struct Hello {
     pub client: String,
     /// Program version.
     pub version: String,
+    /// The client's working directory; shell jobs from this connection start there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 /// [`crate::Kind::Utterance`]: text from the user.

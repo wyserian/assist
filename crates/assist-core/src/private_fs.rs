@@ -9,7 +9,7 @@ use std::io;
 use std::path::Path;
 
 /// Creates `path` and missing parents, owner-only.
-pub(crate) fn create_dir(path: &Path) -> io::Result<()> {
+pub fn create_dir(path: &Path) -> io::Result<()> {
     let mut builder = DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -21,7 +21,7 @@ pub(crate) fn create_dir(path: &Path) -> io::Result<()> {
 }
 
 /// Opens `path` for appending, creating it owner-only.
-pub(crate) fn open_append(path: &Path) -> io::Result<File> {
+pub fn open_append(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
