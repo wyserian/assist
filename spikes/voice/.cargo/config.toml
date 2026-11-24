@@ -1,0 +1,4 @@
+# sherpa-onnx-sys links the library archive downloaded and checksum-checked into models/
+# instead of fetching it during the build.
+[env]
+SHERPA_ONNX_ARCHIVE_DIR = { value = "models", relative = true }

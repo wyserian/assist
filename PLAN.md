@@ -450,7 +450,7 @@ Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM plan
 | Concern | Choice |
 |---|---|
 | Audio | `cpal`, `rubato` |
-| VAD, wake word, STT, speaker verification | official `sherpa-onnx` crate **(default)**: Silero VAD, open-vocabulary keyword spotting, streaming Zipformer; Moonshine/Parakeet for dictation and files. Vosk grammar mode kept as a candidate — decided by a measured Phase 2 spike |
+| VAD, wake word, STT, speaker verification | official `sherpa-onnx` crate (**decided** by the Phase 2 spike, `spikes/voice`): Silero VAD, open-vocabulary keyword spotting, streaming Zipformer; Moonshine/Parakeet for dictation and files. Vosk dropped. Capture keeps a 1 s pre-roll; streaming models get 2 s of zero padding after the endpoint to flush the last word |
 | TTS | OS TTS **(default)** (SAPI/WinRT, speech-dispatcher, Android TextToSpeech); Piper/Kokoro as an **external process** (Piper is now GPL-3.0 via espeak-ng) |
 | Interop | Wyoming protocol adapter (reuse external wake/STT/TTS servers, remote STT) |
 | Recording | `ffmpeg` (external) |
@@ -915,7 +915,9 @@ clipboard sync / send file, more languages + offline translation.
 | Project name | **Decided:** `assist`. Persona (assistant name, wake word, how it addresses you) is config, defaults "Bee" / "Prime" |
 | License | `MIT OR Apache-2.0` |
 | Wire format | JSON (MessagePack later, named encoding) |
-| Voice engine | sherpa-onnx, confirmed by Phase 2 spike vs Vosk |
+| Voice engine | **Decided:** sherpa-onnx (spike vs Vosk, 2026-11-24) |
+| English STT model | Kroko streaming measured best, but its licence is unclear (non-commercial or CC-BY-SA), so it is not the shipped default. Next: measure Apache/MIT streaming models (zipformer-en-2023-06-26, NeMo fast-conformer) on the same clips; Kroko stays a user-downloaded option |
+| sherpa-onnx linking on Windows | Static library is built with `/MT`, Rust with `/MD` (linker warning LNK4098). Decide in `assist-voice`: `shared` feature (DLL next to the binary) or `+crt-static` |
 | TTS | OS TTS + Piper/Kokoro as external process (no GPL in the binary) |
 | External plugins | MCP over stdio |
 | Time / file / fact triggers | Yes, Phase 3 |
@@ -961,6 +963,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-24 | Web UI files embedded with include_str! (three files; rust-embed not needed). Daemon address published in daemon.addr so [server] bind can use port 0. Waiting tab moved to the settings commit (needs dialogs shared across connections) |
 | 2026-11-24 | Learn from misses: unmatched sentences counted in the job store (max 200), command guessed from shared phrase words (list values count double); phrases.add writes <config dir>/phrases/user.toml (built-in command copied first, comments kept via toml_edit) and swaps the engine live |
 | 2026-11-24 | Settings tab edits an allow-list of keys via toml_edit (comments kept): commands.<name>.risky applies live through LiveEngine; lanes, jobs.* and search.url are saved and apply after a restart. New config is fully validated and the engine rebuilt before the file is written |
+| 2026-11-24 | Voice engine spike (`spikes/voice`, 21 of the owner's own clips on the laptop mic, 2 threads): word error rate / latency after end of speech incl. 300 ms endpoint wait / peak RAM. sherpa Kroko streaming 27-30% / 400-490 ms / 180 MB; sherpa Moonshine tiny 88% (60% without one clip where it loops) / 350-620 ms / 155 MB; sherpa zipformer 20M 79-86% (drops first words) / 370-400 ms / 92 MB; Vosk small 77% / 340-470 ms / 289 MB; Vosk grammar 87% (only command words, rest `[unk]`) / 310 ms. All streaming engines fit the 700 ms budget. sherpa-onnx chosen; Vosk dropped (accuracy, RAM, MinGW DLL, no release since 2024). Hotwords gave at most 3 points. Model choice stays open (licence, section 12) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |
