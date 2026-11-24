@@ -24,6 +24,15 @@ pub fn input_devices() -> Result<Vec<String>, VoiceError> {
     Ok(devices.map(|d| d.to_string()).collect())
 }
 
+/// Name parts of headset microphones, which hear the speaker better and the room less than
+/// a laptop's built-in mic. Windows names a Bluetooth headset's mic "Headset (<name>)".
+const HEADSET: [&str; 3] = ["headset", "hands-free", "bluetooth"];
+
+fn is_headset(name: &str) -> bool {
+    let name = name.to_lowercase();
+    HEADSET.iter().any(|part| name.contains(part))
+}
+
 /// An open microphone. Audio is read and converted on its own thread; [`Mic::recv`] returns
 /// 16 kHz mono chunks. Dropping it stops the thread and closes the device.
 pub struct Mic {
@@ -50,8 +59,8 @@ impl Shared {
 }
 
 impl Mic {
-    /// Opens the input device whose name contains `device` (case-insensitive), or the
-    /// system default.
+    /// Opens the input device whose name contains `device` (case-insensitive), or else a
+    /// connected headset (Bluetooth or wired), or else the system default.
     pub fn open(device: Option<&str>) -> Result<Self, VoiceError> {
         let shared = Arc::new(Shared::default());
         let (chunk_tx, chunks) = mpsc::sync_channel(QUEUE);
@@ -164,7 +173,14 @@ type Opened = (
 fn open_stream(wanted: Option<&str>, shared: &Arc<Shared>) -> Result<Opened, VoiceError> {
     let host = cpal::default_host();
     let device = match wanted {
-        None => host.default_input_device().ok_or(VoiceError::NoDevice)?,
+        // shortcut: the device is chosen once at open; a headset connected later needs a
+        // restart, upgrade to following device changes when the tray app runs listen.
+        None => host
+            .input_devices()
+            .ok()
+            .and_then(|mut all| all.find(|d| is_headset(&d.to_string())))
+            .or_else(|| host.default_input_device())
+            .ok_or(VoiceError::NoDevice)?,
         Some(wanted) => host
             .input_devices()
             .map_err(|e| VoiceError::Device(e.to_string()))?
@@ -233,4 +249,16 @@ fn open_stream(wanted: Option<&str>, shared: &Arc<Shared>) -> Result<Opened, Voi
 
 fn mean(frame: &[f32]) -> f32 {
     frame.iter().sum::<f32>() / frame.len() as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn headsets_are_told_from_built_in_mics() {
+        assert!(is_headset("Headset (Airdopes Prime 413)"));
+        assert!(is_headset("Hands-Free AG Audio"));
+        assert!(!is_headset("Microphone Array (Realtek(R) Audio)"));
+    }
 }

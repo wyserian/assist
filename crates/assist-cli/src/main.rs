@@ -77,7 +77,8 @@ enum Command {
     /// models the first time.
     #[cfg(feature = "voice")]
     Listen {
-        /// Microphone whose name contains this text [default: the system default].
+        /// Microphone whose name contains this text [default: a connected headset, else the
+        /// system default].
         #[arg(long)]
         device: Option<String>,
     },
