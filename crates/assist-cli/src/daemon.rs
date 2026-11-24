@@ -10,10 +10,13 @@ use assist_server::{serve, Services};
 use tokio::net::TcpListener;
 
 use crate::setup::{Assistant, Paths};
-use crate::triggers;
+use crate::{proactive, triggers};
 
 /// File in the data directory with the address the daemon listens on.
 const ADDR_FILE: &str = "daemon.addr";
+
+/// Proactive messages waiting for slow clients; a client further behind skips some.
+const NOTICE_QUEUE: usize = 64;
 
 /// How long shutdown waits for stopped jobs to end.
 const STOP_WAIT: Duration = Duration::from_secs(10);
@@ -33,10 +36,12 @@ pub async fn run(paths: Paths) -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
+    let notices = tokio::sync::broadcast::channel(NOTICE_QUEUE).0;
     let services = Services {
         scheduler: assistant.scheduler.clone(),
         engine: assistant.engine.clone(),
         facts: assistant.facts.clone(),
+        notices: notices.clone(),
         store: assistant.store.clone(),
         audit: Some(assistant.audit.clone()),
         secrets: assistant.secrets.clone(),
@@ -53,6 +58,13 @@ pub async fn run(paths: Paths) -> Result<()> {
             facts: assistant.facts.clone(),
             cwd: std::env::current_dir()?,
         },
+    );
+    proactive::start(
+        &assistant.config,
+        assistant.scheduler.clone(),
+        assistant.facts.clone(),
+        paths.data().clone(),
+        notices,
     );
     let result = serve(services, listener, async {
         let _ = tokio::signal::ctrl_c().await;

@@ -68,9 +68,36 @@ impl Condition {
         Ok(Self(expr))
     }
 
+    /// The fact names the condition reads.
+    pub fn names(&self) -> Vec<&str> {
+        let mut names = Vec::new();
+        collect(&self.0, &mut names);
+        names
+    }
+
     /// Evaluates the condition, reading facts with `fact`.
     pub fn eval(&self, fact: &impl Fn(&str) -> Option<Value>) -> bool {
         eval(&self.0, fact)
+    }
+}
+
+fn collect<'a>(expr: &'a Expr, names: &mut Vec<&'a str>) {
+    let mut operand = |o: &'a Operand| {
+        if let Operand::Fact(name) = o {
+            names.push(name.as_str());
+        }
+    };
+    match expr {
+        Expr::Or(a, b) | Expr::And(a, b) => {
+            collect(a, names);
+            collect(b, names);
+        }
+        Expr::Not(a) => collect(a, names),
+        Expr::Compare(a, _, b) => {
+            operand(a);
+            operand(b);
+        }
+        Expr::Is(a) => operand(a),
     }
 }
 

@@ -30,6 +30,8 @@ pub(crate) struct Conn {
     cwd: PathBuf,
     /// All job updates, not only this connection's own jobs.
     subscribed: bool,
+    /// Proactive messages.
+    notices: bool,
     jobs: HashSet<JobId>,
 }
 
@@ -50,8 +52,10 @@ pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Cred
         principal,
         peer: source.to_owned(),
         subscribed: false,
+        notices: false,
         jobs: HashSet::new(),
     };
+    let mut notices = conn.state.services.notices.subscribe();
     loop {
         let outgoing = tokio::select! {
             biased;
@@ -65,6 +69,13 @@ pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Cred
             event = events.recv() => match event {
                 Ok(event) => conn.event(event).into_iter().collect(),
                 Err(RecvError::Lagged(_)) => Vec::new(),
+                Err(RecvError::Closed) => break,
+            },
+            notice = notices.recv() => match notice {
+                Ok(notice) if conn.notices => {
+                    vec![Envelope::new(Kind::Notice, HUB, &conn.peer, notice)]
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => Vec::new(),
                 Err(RecvError::Closed) => break,
             },
             Some(answer) = answers.recv() => {
@@ -113,6 +124,7 @@ impl Conn {
             Kind::Subscribe => match message.body::<Subscribe>() {
                 Ok(subscribe) => {
                     self.subscribed = subscribe.topics.iter().any(|t| t == "jobs");
+                    self.notices = subscribe.topics.iter().any(|t| t == "notices");
                     Vec::new()
                 }
                 Err(err) => vec![bad_request(&message, &err)],
@@ -125,7 +137,9 @@ impl Conn {
                 Err(err) => vec![bad_request(&message, &err)],
             },
             // Only the hub sends these; unknown kinds are ignored.
-            Kind::Reply | Kind::JobUpdate | Kind::RpcResult | Kind::Unknown => Vec::new(),
+            Kind::Reply | Kind::JobUpdate | Kind::Notice | Kind::RpcResult | Kind::Unknown => {
+                Vec::new()
+            }
         }
     }
 

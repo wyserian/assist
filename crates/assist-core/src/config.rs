@@ -73,6 +73,66 @@ pub struct Config {
     /// Voice input.
     #[serde(default)]
     pub voice: VoiceConfig,
+    /// Messages the assistant sends unasked.
+    #[serde(default)]
+    pub proactive: ProactiveConfig,
+}
+
+/// Where a proactive message goes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sink {
+    /// Connected clients: `assist listen` says it, the dashboard shows it.
+    #[default]
+    Speak,
+    /// A desktop notification.
+    Notify,
+}
+
+/// `[proactive]`: rules that speak up unasked (PLAN.md section 3.17).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ProactiveConfig {
+    /// `"23:00-07:00"`: nothing is said in this local time window.
+    pub quiet_hours: Option<String>,
+    /// Most messages per hour, all rules together.
+    pub max_per_hour: usize,
+    /// Where messages go unless a rule says otherwise.
+    pub sink: Sink,
+    /// The rules.
+    pub rules: Vec<ProactiveRule>,
+}
+
+impl Default for ProactiveConfig {
+    fn default() -> Self {
+        Self {
+            quiet_hours: None,
+            max_per_hour: 4,
+            sink: Sink::Speak,
+            rules: Vec::new(),
+        }
+    }
+}
+
+/// `[[proactive.rules]]`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProactiveRule {
+    /// Name, for muting ("stop telling me about build-failed").
+    pub name: String,
+    /// When: a condition over facts, or over `job.*` when a job ends.
+    pub on: String,
+    /// What to say; `{command}`, `{error}`, fact names and `{address}` are filled in.
+    pub say: String,
+    /// Shortest time between two messages of this rule.
+    #[serde(default = "ten_minutes", deserialize_with = "duration")]
+    pub every: Duration,
+    /// Where it goes, if not `[proactive] sink`.
+    pub sink: Option<Sink>,
+}
+
+fn ten_minutes() -> Duration {
+    Duration::from_secs(600)
 }
 
 /// `[voice]`: voice input settings.
@@ -371,6 +431,7 @@ impl Config {
             }
         }
         config.validate_triggers()?;
+        config.validate_proactive()?;
         if let Some(key) = config.replies.keys().find(|k| Line::from_key(k).is_none()) {
             return Err(ConfigError::Invalid(format!(
                 "[replies] {key} is not a known reply"
@@ -444,6 +505,40 @@ impl Config {
         Ok(())
     }
 
+    fn validate_proactive(&self) -> Result<(), ConfigError> {
+        let proactive = &self.proactive;
+        let invalid = |reason: String| Err(ConfigError::Invalid(format!("[proactive] {reason}")));
+        if proactive.max_per_hour == 0 {
+            return invalid("max_per_hour must be at least 1".to_owned());
+        }
+        if let Some(quiet) = &proactive.quiet_hours {
+            if crate::proactive::parse_quiet(quiet).is_none() {
+                return invalid(format!("quiet_hours {quiet:?}: use e.g. 23:00-07:00"));
+            }
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for rule in &proactive.rules {
+            let ok = !rule.name.is_empty()
+                && rule.name.len() <= 64
+                && rule.name.bytes().all(|b| {
+                    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b' '
+                });
+            if !ok {
+                return invalid(format!(
+                    "rule name {:?}: use a-z, 0-9, spaces and -",
+                    rule.name
+                ));
+            }
+            if !names.insert(rule.name.as_str()) {
+                return invalid(format!("two rules are named {:?}", rule.name));
+            }
+            if let Err(err) = Condition::parse(&rule.on) {
+                return invalid(format!("{}: {err}", rule.name));
+            }
+        }
+        Ok(())
+    }
+
     /// Value lists that `list:<name>` slots match against: `apps`, `contacts`, `scripts`,
     /// `pipes`.
     pub fn lists(&self) -> BTreeMap<String, Vec<String>> {
@@ -455,6 +550,14 @@ impl Config {
             ),
             ("scripts".to_owned(), self.scripts.keys().cloned().collect()),
             ("pipes".to_owned(), self.pipes.keys().cloned().collect()),
+            (
+                "rules".to_owned(),
+                self.proactive
+                    .rules
+                    .iter()
+                    .map(|r| r.name.clone())
+                    .collect(),
+            ),
         ])
     }
 }
@@ -592,7 +695,7 @@ x = { run = \"run build\", if = \"node.battery <\" }
         let config = Config::from_toml("").unwrap();
         assert_eq!(config.config_version, CURRENT_VERSION);
         assert!(config.apps.is_empty());
-        assert_eq!(config.lists().len(), 4);
+        assert_eq!(config.lists().len(), 5);
     }
 
     #[test]

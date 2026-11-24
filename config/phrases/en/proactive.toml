@@ -1,0 +1,17 @@
+# Muting proactive messages ([[proactive.rules]] in config.toml). Typed: "mute build-failed".
+
+[mute]
+slots = { rule = "list:rules" }
+reply = "Okay, no more {rule}."
+phrases = [
+    "stop telling me about (the)? .rule.",
+    "mute (the)? .rule. (rule|alerts|messages)?",
+]
+
+[unmute]
+slots = { rule = "list:rules" }
+reply = "I'll tell you about {rule} again."
+phrases = [
+    "(start)? tell me about (the)? .rule. again",
+    "unmute (the)? .rule. (rule|alerts|messages)?",
+]

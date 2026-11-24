@@ -433,6 +433,16 @@ Rules:
   LLM request; each such request is audited.
 - **Proactive output is rate-limited and quiet-hours aware;** every rule can be muted from the
   dashboard or by saying "stop telling me about X".
+- Built (Phase 3): `[proactive]` with `quiet_hours`, `max_per_hour`, `sink` and
+  `[[proactive.rules]] { name, on, say, every (default 10m), sink }`. A rule naming `job.*`
+  is checked when a job ends (`job.failed`, `job.state`, `job.command`, `job.title`,
+  `job.lane`, `job.source`, `job.error`); others fire when their fact condition turns true.
+  Gates: muted, the rule's `every`, quiet hours, `max_per_hour`; held messages are dropped.
+  `speak` sends a `notice` message to clients subscribed to `notices` (`assist listen` says
+  it, the dashboard shows it); `notify` shows a desktop notification (`notify-rust`; on
+  Windows it shows as from PowerShell until assist has its own app id). Muting: "stop
+  telling me about X" / "tell me about X again" or `mute X` / `unmute X`, saved in
+  `<data>/muted.json`. Not yet: presence (`user.away`), dashboard mute toggles, Telegram.
 - **The LLM never runs actions directly** and never sees secrets.
 
 ### 3.18 Autopilot mode
@@ -494,7 +504,7 @@ Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM plan
 | Process trees | ⊕ `process-wrap` |
 | Metrics (Phase 3) | ⊕ `sysinfo` (sampled only when jobs are listed; also walks process trees for pause) |
 | Secrets | `keyring`, fallback `age` |
-| Automation | `open`, `enigo`, `arboard`, `notify-rust`, `xcap`, `global-hotkey` |
+| Automation | `open`, `enigo`, `arboard`, `notify-rust` (proactive notifications, Phase 3), `xcap`, `global-hotkey` |
 | File watch | `notify` |
 | Local time | ⊕ `jiff` (schedules in the local time zone) |
 | Windows APIs | ⊕ `windows` / `windows-sys` (OCR, priority, suspend) |
@@ -1039,6 +1049,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Speech to text from a file (Phase 3 step 5d): `transcribe <file>` reuses Kroko with the VAD splitting sentences (one line each, untrusted output). WAV read directly (at most 15 minutes, bounds memory near 60 MB); other formats, such as `record audio` files, converted by ffmpeg when installed. Feature `transcribe` in assist-actions, enabled by assist-cli `voice`, so a build without voice links no speech models |
 | 2026-11-25 | Job control (Phase 3 step 6): pause, resume and per-job CPU and memory, as approved by the owner: `sysinfo` 0.40 (MIT; workspace `rust-version` raised from 1.85 to 1.95 for it, the toolchain is stable) and a second audited `unsafe` module, `processes_win32.rs` (ntdll `NtSuspendProcess` / `NtResumeProcess`). New job state `paused` (wire name `paused`; a paused job at shutdown becomes `interrupted`) |
 | 2026-11-25 | Autostart (Phase 3 step 6): `assist install-autostart [--remove]` starts the daemon at login with the absolute config and data paths of the install. Windows (owner chose hidden): Startup-folder shortcut to `conhost.exe --headless "<assist.exe>" ... serve`, written by PowerShell COM with paths passed as environment variables. Linux: systemd user service, enabled with `systemctl --user enable --now`. Limit: no console, so daemon prints are not seen until a log file exists |
+| 2026-11-25 | Proactive engine (Phase 3 step 7): rules in core (`proactive.rs`, pure; `Condition::names` tells job rules from fact rules), runner in the daemon. Delivery chosen by the owner: connected clients (new protocol kind `notice`, topic `notices`) and desktop notifications through `notify-rust` 4.19 (MIT OR Apache-2.0). Mute is an action with `read` capability: it only changes what the assistant tells you |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

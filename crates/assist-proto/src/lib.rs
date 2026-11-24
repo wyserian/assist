@@ -17,8 +17,8 @@ mod job;
 pub mod rpc;
 
 pub use body::{
-    Hello, JobBrief, JobSummary, JobUpdate, Reply, Rpc, RpcError, RpcResult, Stream, Subscribe,
-    Utterance,
+    Hello, JobBrief, JobSummary, JobUpdate, Notice, Reply, Rpc, RpcError, RpcResult, Stream,
+    Subscribe, Utterance,
 };
 pub use job::{JobState, Lane};
 
@@ -40,6 +40,9 @@ pub enum Kind {
     Reply,
     /// A job changed state or produced output.
     JobUpdate,
+    /// Something the assistant says unasked (PLAN.md section 3.17); sent to clients that
+    /// subscribed to `notices`.
+    Notice,
     /// Start receiving job updates.
     Subscribe,
     /// A request: list jobs, stop a job, set a secret, ...

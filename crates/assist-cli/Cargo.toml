@@ -28,6 +28,7 @@ clap.workspace = true
 directories.workspace = true
 jiff.workspace = true
 notify.workspace = true
+notify-rust.workspace = true
 futures-util.workspace = true
 keyring.workspace = true
 open.workspace = true

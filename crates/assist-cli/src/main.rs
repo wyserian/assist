@@ -18,6 +18,7 @@ mod keystore;
 mod listen;
 #[cfg(feature = "voice")]
 mod models;
+mod proactive;
 mod repl;
 mod setup;
 mod triggers;

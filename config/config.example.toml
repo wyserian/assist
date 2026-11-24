@@ -35,6 +35,19 @@ errors = { run = "run build | filter error | save build-errors.txt", retry = 1 }
 # run = "errors"
 # watch = "~/Downloads"          # fires when something in the folder changes
 
+# Messages the assistant sends unasked. sink = "speak" goes to assist listen and the
+# dashboard, "notify" to a desktop notification. Mute a rule by saying "stop telling me
+# about <name>" (or typing mute <name>); "tell me about <name> again" undoes it.
+[proactive]
+quiet_hours = "23:00-07:00"
+max_per_hour = 4
+sink = "speak"
+
+[[proactive.rules]]
+name = "background failed"
+on = "job.failed and job.lane == 'background'"
+say = "{address}, {title} failed."
+
 [contacts]
 mom = "+910000000000"
 dad = "+910000000001"

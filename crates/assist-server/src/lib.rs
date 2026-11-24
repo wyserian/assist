@@ -56,6 +56,8 @@ pub struct Services {
     pub engine: Arc<LiveEngine>,
     /// Current device state.
     pub facts: Facts,
+    /// Proactive messages for connected clients.
+    pub notices: tokio::sync::broadcast::Sender<assist_proto::Notice>,
     /// The user phrase file that `phrases.add` writes to.
     pub user_phrases: Option<PathBuf>,
     /// The config file that `settings.set` edits.

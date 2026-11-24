@@ -24,7 +24,8 @@ use assist_proto::rpc::{
     self, AuditEntry, Explanation, JobRef, Otp, SecretEntry, SecretName, SecretSet,
 };
 use assist_proto::{
-    Envelope, Hello, JobState, JobSummary, JobUpdate, Kind, Reply, Rpc, RpcResult, Utterance,
+    Envelope, Hello, JobState, JobSummary, JobUpdate, Kind, Notice, Reply, Rpc, RpcResult,
+    Subscribe, Utterance,
 };
 use assist_server::{load_or_create_token, serve, Services};
 use futures_util::{SinkExt, StreamExt};
@@ -89,6 +90,7 @@ struct Daemon {
     token: String,
     dir: PathBuf,
     stop: Option<oneshot::Sender<()>>,
+    notices: tokio::sync::broadcast::Sender<Notice>,
 }
 
 impl Drop for Daemon {
@@ -135,8 +137,10 @@ async fn start(name: &str) -> Daemon {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (stop, stopped) = oneshot::channel::<()>();
+    let notices = tokio::sync::broadcast::channel(16).0;
     let services = Services {
         facts: Facts::default(),
+        notices: notices.clone(),
         scheduler,
         engine,
         store,
@@ -155,6 +159,7 @@ async fn start(name: &str) -> Daemon {
         token,
         dir,
         stop: Some(stop),
+        notices,
     }
 }
 
@@ -271,6 +276,42 @@ async fn refuses_strangers() {
     let mut evil_origin = bearer(&daemon);
     evil_origin.push(("origin", "https://evil.example".to_owned()));
     assert_eq!(status(connect(port, &evil_origin).await), 403);
+}
+
+#[tokio::test]
+async fn notices_reach_only_subscribed_clients() {
+    let daemon = start("notices").await;
+    let hello = Hello {
+        client: "test".to_owned(),
+        version: "0".to_owned(),
+        cwd: None,
+        voice: false,
+    };
+    let mut listening = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    let mut other = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    for ws in [&mut listening, &mut other] {
+        send(ws, Kind::Hello, hello.clone()).await;
+        recv(ws).await.unwrap();
+    }
+    let topics = Subscribe {
+        topics: vec!["notices".to_owned()],
+    };
+    send(&mut listening, Kind::Subscribe, topics).await;
+    // A round trip, so the subscription is in place before the notice goes out.
+    send(&mut listening, Kind::Hello, hello.clone()).await;
+    recv(&mut listening).await.unwrap();
+
+    let notice = Notice {
+        rule: "build-failed".to_owned(),
+        text: "Your build failed.".to_owned(),
+    };
+    daemon.notices.send(notice.clone()).unwrap();
+    let got = recv(&mut listening).await.unwrap();
+    assert_eq!(got.kind, Kind::Notice);
+    assert_eq!(got.body::<Notice>().unwrap(), notice);
+    // The other client gets its own next answer, not the notice.
+    send(&mut other, Kind::Hello, hello).await;
+    assert_eq!(recv(&mut other).await.unwrap().kind, Kind::Hello);
 }
 
 #[tokio::test]

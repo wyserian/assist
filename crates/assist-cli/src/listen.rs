@@ -68,6 +68,7 @@ pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
         println!("No voiceprint: confirm calls and messages on screen, or run assist enroll.");
     }
     let mut client = Client::connect(paths.data(), true).await?;
+    client.subscribe(&["notices"]).await?;
     println!("Loading voice models...");
 
     let paused = Arc::new(AtomicBool::new(false));
@@ -95,6 +96,13 @@ pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
                     println!("{}", if pause { "Paused. Enter resumes." } else { "Listening." });
                 }
                 _ => stdin_open = false,
+            },
+            notice = client.notice() => match notice {
+                Ok(notice) => {
+                    println!("{}", printable(&notice.text));
+                    let _ = say_tx.try_send(notice.text);
+                }
+                Err(err) => break Err(err),
             },
             heard = heard.recv() => match heard {
                 Some(Heard::Ready(mic)) => {

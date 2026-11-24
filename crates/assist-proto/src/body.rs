@@ -95,8 +95,17 @@ pub enum JobUpdate {
 /// [`crate::Kind::Subscribe`]: which updates to receive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Subscribe {
-    /// Topics; `jobs` sends every [`JobUpdate`].
+    /// Topics: `jobs` sends every [`JobUpdate`], `notices` every [`Notice`].
     pub topics: Vec<String>,
+}
+
+/// [`crate::Kind::Notice`]: a proactive message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Notice {
+    /// The rule that sent it, for "stop telling me about ...".
+    pub rule: String,
+    /// What to say.
+    pub text: String,
 }
 
 /// [`crate::Kind::Rpc`]: a request.

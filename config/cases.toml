@@ -134,6 +134,17 @@ text = "start recording audio for 30 seconds"
 command = "record"
 slots = { spec = "audio for 30 seconds" }
 
+# proactive messages
+[[case]]
+text = "stop telling me about background failed"
+command = "mute"
+slots = { rule = "background failed" }
+
+[[case]]
+text = "tell me about the background failed again"
+command = "unmute"
+slots = { rule = "background failed" }
+
 # saved pipes
 [[case]]
 text = "run errors"

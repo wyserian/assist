@@ -4,7 +4,9 @@ use std::collections::VecDeque;
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
-use assist_proto::{Envelope, Hello, JobUpdate, Kind, Reply, Rpc, RpcResult, Utterance, Uuid};
+use assist_proto::{
+    Envelope, Hello, JobUpdate, Kind, Notice, Reply, Rpc, RpcResult, Subscribe, Utterance, Uuid,
+};
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -104,6 +106,27 @@ impl Client {
             (_, Some(error)) => bail!("{}", error.message),
             (Some(value), None) => Ok(serde_json::from_value(value)?),
             (None, None) => bail!("empty answer to {method}"),
+        }
+    }
+
+    /// Asks for `topics` (`jobs`, `notices`) as they happen.
+    pub async fn subscribe(&mut self, topics: &[&str]) -> Result<()> {
+        let topics = topics.iter().map(|t| (*t).to_owned()).collect();
+        self.send(Kind::Subscribe, Subscribe { topics }).await?;
+        Ok(())
+    }
+
+    /// The next proactive message; other messages that arrive meanwhile are skipped.
+    /// Cancel-safe, so it can wait in a `select!`.
+    pub async fn notice(&mut self) -> Result<Notice> {
+        loop {
+            let message = match self.pending.pop_front() {
+                Some(message) => message,
+                None => self.next().await?,
+            };
+            if message.kind == Kind::Notice {
+                return Ok(message.body()?);
+            }
         }
     }
 

@@ -81,6 +81,8 @@ function onMessage(event) {
     showReply(message.body || {});
   } else if (message.kind === "job_update") {
     showUpdate(message.body || {});
+  } else if (message.kind === "notice") {
+    logLine((message.body || {}).text || "");
   }
 }
 
@@ -103,7 +105,7 @@ function connect() {
     $("signin").hidden = true;
     setStatus("Connected");
     send("hello", { client: "assist-web", version: "1" });
-    send("subscribe", { topics: ["jobs"] });
+    send("subscribe", { topics: ["jobs", "notices"] });
     refresh(currentTab());
   });
   socket.addEventListener("message", onMessage);
