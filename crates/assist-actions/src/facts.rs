@@ -1,5 +1,7 @@
 //! Fact sources for this device (PLAN.md section 3.10): `node.battery` (percent) and
-//! `node.charging` (plugged in). A device without a battery reports neither.
+//! `node.charging` (plugged in), and on Windows `app.focused` (the foreground app's file
+//! name) and `user.idle` (seconds since the last input). A fact this device cannot tell,
+//! such as the battery of a desktop, is left out.
 
 use assist_core::facts::Value;
 
@@ -10,10 +12,11 @@ mod os;
 #[path = "facts_windows.rs"]
 mod os;
 
-/// The battery facts, sampled now. Blocking (it reads OS state); call off the async runtime.
+/// This device's facts, sampled now. Blocking (it reads OS state); call off the async
+/// runtime.
 ///
-/// shortcut: `app.focused` and `user.idle` need Win32 calls that are `unsafe`, which the
-/// workspace forbids, and X11 on Linux; add them with an audited exception or a safe crate.
+/// shortcut: on Linux `app.focused` and `user.idle` need X11 or Wayland libraries; add them
+/// when Linux desktops use focus conditions.
 pub fn sample() -> Vec<(&'static str, Value)> {
     #[cfg(any(target_os = "linux", windows))]
     {

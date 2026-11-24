@@ -44,7 +44,9 @@ uuid = "1"
 windows = "0.62"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# deny, not forbid, so one audited module may opt out: the Win32 fact reader in
+# assist-actions (facts_win32.rs). Every other `unsafe` fails the build.
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

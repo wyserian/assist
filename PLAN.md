@@ -268,8 +268,9 @@ publish selected facts to the hub. (Built in Phase 3 together with its first con
   not stored on disk. Sources live in `assist-actions` (feature `facts`); the daemon samples
   them every 30 s off the async runtime. `assist facts` (rpc `facts.list`) shows them.
 - Desktop sources so far: `node.battery`, `node.charging` (plugged in) from WinRT
-  `PowerManager` on Windows and `/sys/class/power_supply` on Linux. `app.focused` and idle
-  time need `unsafe` Win32 calls (the workspace forbids `unsafe`) or X11 on Linux.
+  `PowerManager` on Windows and `/sys/class/power_supply` on Linux; on Windows also
+  `app.focused` (foreground app's file name, e.g. `Code.exe`) and `user.idle` (seconds since
+  the last input) from Win32. On Linux those two need X11 or Wayland libraries (later).
 - Conditions (`if` on saved pipes now; fact triggers and proactive rules later): `and`, `or`,
   `not`, `== != < <= > >=`, parentheses, numbers, `'text'` (compared ignoring case),
   `true`/`false`. A fact that is not set makes its comparison false. The dialog checks a
@@ -1004,6 +1005,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Pipes (Phase 3 step 1): `PipeShape { input, output, arg }` on every action manifest; transforms are actions in `assist-actions` (feature `transforms`) with a raw `<name> <arg>` syntax, because phrase matching normalizes text (paths, regexes). The scheduler runs a pipe as one task holding one lane slot (per-stage slots could deadlock a pipe longer than the lane), stages joined by bounded channels; a single job is a one-stage pipe. `JobSummary.group` marks stages (not persisted yet). `map`, `json` and `post` wait for an expression syntax and an HTTP action |
 | 2026-11-25 | Saved pipes and pipe control (Phase 3 step 2): `[pipes]`, `run_pipe` phrase-only command expanded by the dialog, `retry` (max 10) and `on_error` in the scheduler (`Submission`), policy over every stage that may run. Taint rule: `PipeShape.untrusted`; a `send` stage after an untrusted one always asks. No action declares untrusted output yet (OCR and web actions will). `if <fact>` comes with facts in step 3 |
 | 2026-11-25 | Facts (Phase 3 step 3): core `Facts` store and `Condition` language; `if` on saved pipes checked by the dialog (a skipped pipe makes no jobs). Battery facts through safe APIs only (WinRT `PowerManager`, Linux sysfs); focused app and idle time wait for a decision on an audited `unsafe` exception, since `unsafe_code` is forbidden workspace-wide |
+| 2026-11-25 | `unsafe_code` lowered from `forbid` to `deny` so exactly one audited module may opt out: `assist-actions/src/facts_win32.rs` (read-only Win32: foreground window, process image name, last input time), each call with a SAFETY comment. Approved by the owner; any other `unsafe` still fails the build |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |
