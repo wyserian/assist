@@ -17,7 +17,7 @@ use crate::setup::Paths;
 /// Says `text`, answers any questions on the terminal, and follows the started jobs to
 /// the end. Fails if a job did not finish successfully.
 pub async fn run(paths: &Paths, text: &str) -> Result<ExitCode> {
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     let mut reply = client.say(text).await?;
     let mut running = HashSet::new();
     loop {
@@ -67,7 +67,7 @@ pub async fn run(paths: &Paths, text: &str) -> Result<ExitCode> {
 
 /// Lists active and recent jobs.
 pub async fn jobs(paths: &Paths) -> Result<()> {
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     let jobs: Vec<JobSummary> = client.call(rpc::JOBS_LIST, ()).await?;
     if jobs.is_empty() {
         println!("No jobs yet.");
@@ -80,7 +80,7 @@ pub async fn jobs(paths: &Paths) -> Result<()> {
 
 /// Stops one job (`<id>`) or every job (`all`).
 pub async fn stop(paths: &Paths, target: &str) -> Result<()> {
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     if target == "all" {
         let stopped: usize = client.call(rpc::JOBS_STOP_ALL, ()).await?;
         println!("Stopping {stopped} job(s).");
@@ -100,7 +100,7 @@ pub async fn stop(paths: &Paths, target: &str) -> Result<()> {
 
 /// Prints a job's last output.
 pub async fn log(paths: &Paths, id: u64) -> Result<()> {
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     let lines: Vec<String> = client.call(rpc::JOBS_TAIL, JobRef { id }).await?;
     for line in &lines {
         println!("{}", printable(line));
@@ -110,7 +110,7 @@ pub async fn log(paths: &Paths, id: u64) -> Result<()> {
 
 /// Shows what `text` would do, without doing it.
 pub async fn explain(paths: &Paths, text: &str) -> Result<()> {
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     let explanation: Option<Explanation> = client
         .call(
             rpc::COMMANDS_EXPLAIN,
@@ -138,7 +138,7 @@ pub async fn explain(paths: &Paths, text: &str) -> Result<()> {
 /// Opens the dashboard in the default browser, signed in with a one-time code; with `print`,
 /// prints the link instead.
 pub async fn ui(paths: &Paths, print: bool) -> Result<()> {
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     let otp: Otp = client.call(rpc::AUTH_OTP, ()).await?;
     let url = format!("http://{}/#otp={}", client.addr(), otp.code);
     if print {
@@ -157,7 +157,7 @@ pub async fn ui(paths: &Paths, print: bool) -> Result<()> {
 
 /// Lists secret names; values are never shown.
 pub async fn secret_list(paths: &Paths) -> Result<()> {
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     let secrets: Vec<SecretEntry> = client.call(rpc::SECRETS_LIST, ()).await?;
     if secrets.is_empty() {
         println!("No secrets.");
@@ -179,7 +179,7 @@ pub async fn secret_set(paths: &Paths, name: &str) -> Result<()> {
     if value.is_empty() {
         bail!("no value given");
     }
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     let secret = SecretSet {
         name: name.to_owned(),
         value,
@@ -191,7 +191,7 @@ pub async fn secret_set(paths: &Paths, name: &str) -> Result<()> {
 
 /// Deletes a secret.
 pub async fn secret_delete(paths: &Paths, name: &str) -> Result<()> {
-    let mut client = Client::connect(paths.data()).await?;
+    let mut client = Client::connect(paths.data(), false).await?;
     let name = SecretName {
         name: name.to_owned(),
     };
@@ -205,7 +205,7 @@ pub async fn secret_delete(paths: &Paths, name: &str) -> Result<()> {
 }
 
 /// Reads one line from stdin without blocking the runtime; empty at end of input.
-async fn read_line(prompt: &str) -> Result<String> {
+pub(crate) async fn read_line(prompt: &str) -> Result<String> {
     print!("{prompt}");
     io::stdout().flush()?;
     let line = tokio::task::spawn_blocking(|| {

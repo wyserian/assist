@@ -57,6 +57,15 @@ impl Principal {
             trust: Trust::Local,
         }
     }
+
+    /// Whoever speaks near this machine's microphone; unverified until speaker verification.
+    pub fn voice(source: &str) -> Self {
+        Self {
+            source: source.to_owned(),
+            user: "unverified".to_owned(),
+            trust: Trust::Voice,
+        }
+    }
 }
 
 /// What an action may touch. Actions declare these in their manifest.

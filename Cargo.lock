@@ -139,6 +139,7 @@ dependencies = [
  "assist-core",
  "assist-proto",
  "assist-server",
+ "assist-voice",
  "clap",
  "directories",
  "futures-util",
@@ -146,6 +147,7 @@ dependencies = [
  "open",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite 0.30.0",
 ]

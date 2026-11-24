@@ -17,6 +17,7 @@ anyhow = "1"
 assist-server = { path = "crates/assist-server" }
 assist-core = { path = "crates/assist-core" }
 assist-proto = { path = "crates/assist-proto" }
+assist-voice = { path = "crates/assist-voice" }
 clap = { version = "4", features = ["derive"] }
 cpal = "0.18"
 directories = "6"

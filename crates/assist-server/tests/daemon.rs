@@ -273,6 +273,7 @@ async fn token_client_runs_and_inspects_jobs() {
             client: "test".to_owned(),
             version: "0".to_owned(),
             cwd: None,
+            voice: false,
         },
     )
     .await;
@@ -337,6 +338,33 @@ async fn token_client_runs_and_inspects_jobs() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert_eq!(events, ["submitted", "running", "done"]);
+}
+
+#[tokio::test]
+async fn voice_client_gets_voice_trust() {
+    let daemon = start("voice").await;
+    let mut ws = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    let hello = Hello {
+        client: "test".to_owned(),
+        version: "0".to_owned(),
+        cwd: None,
+        voice: true,
+    };
+    send(&mut ws, Kind::Hello, hello).await;
+    recv(&mut ws).await.unwrap();
+
+    // Shell is denied for voice, and nothing local-only is allowed.
+    let utterance = Utterance {
+        text: "$ echo hi".to_owned(),
+    };
+    send(&mut ws, Kind::Utterance, utterance).await;
+    let reply: Reply = recv(&mut ws).await.unwrap().body().unwrap();
+    assert!(reply.jobs.is_empty(), "{reply:?}");
+    let name = SecretName {
+        name: "x".to_owned(),
+    };
+    let denied = call_raw(&mut ws, rpc::SECRETS_DELETE, name).await;
+    assert_eq!(denied.error.unwrap().code, "denied");
 }
 
 /// A minimal HTTP/1.1 GET; returns the whole response.

@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use assist_core::action::Chunk;
 use assist_core::dialog::Dialog;
-use assist_core::policy::Principal;
+use assist_core::policy::{Principal, Trust};
 use assist_core::scheduler::{JobEvent, JobId, JobState};
 use assist_proto::{
     Envelope, Hello, JobBrief, JobUpdate, Kind, Reply, Rpc, RpcResult, Stream, Subscribe, Utterance,
@@ -134,10 +134,16 @@ impl Conn {
         if let Some(cwd) = hello.cwd.map(PathBuf::from).filter(|p| p.is_dir()) {
             self.cwd = cwd;
         }
+        // Only ever lowers trust; a pending question from the old principal is dropped.
+        if hello.voice && self.principal.trust == Trust::Local {
+            self.principal = Principal::voice("voice");
+            self.dialog = Dialog::new(self.state.services.engine.get(), self.principal.clone());
+        }
         let ours = Hello {
             client: "assist-server".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
             cwd: None,
+            voice: false,
         };
         message.answer(Kind::Hello, HUB, ours)
     }

@@ -15,6 +15,10 @@ pub struct Hello {
     /// The client's working directory; shell jobs from this connection start there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// Utterances come from a microphone: the daemon gives this connection voice trust
+    /// (anyone in the room). A client can only lower its trust this way, never raise it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub voice: bool,
 }
 
 /// [`crate::Kind::Utterance`]: text from the user.

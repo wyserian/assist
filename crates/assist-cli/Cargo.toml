@@ -12,12 +12,18 @@ publish.workspace = true
 name = "assist"
 path = "src/main.rs"
 
+[features]
+default = ["voice"]
+# assist listen: microphone, speech to text, spoken replies.
+voice = ["dep:assist-voice", "dep:sha2"]
+
 [dependencies]
 anyhow.workspace = true
 assist-actions.workspace = true
 assist-core.workspace = true
 assist-proto.workspace = true
 assist-server.workspace = true
+assist-voice = { workspace = true, optional = true }
 clap.workspace = true
 directories.workspace = true
 futures-util.workspace = true
@@ -25,6 +31,7 @@ keyring.workspace = true
 open.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite.workspace = true
 

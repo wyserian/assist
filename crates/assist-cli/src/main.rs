@@ -11,6 +11,10 @@ mod commands;
 mod daemon;
 mod display;
 mod keystore;
+#[cfg(feature = "voice")]
+mod listen;
+#[cfg(feature = "voice")]
+mod models;
 mod repl;
 mod setup;
 
@@ -69,6 +73,14 @@ enum Command {
     /// Interactive shell without a daemon: type commands, "$ cmd" for the system shell,
     /// "help" for more.
     Shell,
+    /// Speak commands to the daemon and hear the replies. Asks before downloading the voice
+    /// models the first time.
+    #[cfg(feature = "voice")]
+    Listen {
+        /// Microphone whose name contains this text [default: the system default].
+        #[arg(long)]
+        device: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -111,6 +123,8 @@ fn main() -> Result<ExitCode> {
                 commands::secret_delete(&paths, &name).await?;
             }
             Command::Shell => repl::run(paths).await?,
+            #[cfg(feature = "voice")]
+            Command::Listen { device } => listen::run(&paths, device).await?,
         }
         Ok(ExitCode::SUCCESS)
     })

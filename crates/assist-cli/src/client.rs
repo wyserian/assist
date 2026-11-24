@@ -29,8 +29,9 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connects to the daemon of the data directory `data` and says hello.
-    pub async fn connect(data: &Path) -> Result<Self> {
+    /// Connects to the daemon of the data directory `data` and says hello; `voice` asks for
+    /// voice trust (utterances from a microphone).
+    pub async fn connect(data: &Path, voice: bool) -> Result<Self> {
         let addr = std::fs::read_to_string(addr_file(data))
             .map_err(|_| anyhow!("No daemon running. Start it with: assist serve"))?;
         let addr = addr.trim();
@@ -60,6 +61,7 @@ impl Client {
             client: "assist-cli".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
             cwd,
+            voice,
         };
         let sent = client.send(Kind::Hello, hello).await?;
         client.answer(sent).await?;

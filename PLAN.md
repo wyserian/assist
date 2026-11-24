@@ -844,7 +844,7 @@ Secrets, Settings, Commands with miss suggestions, Audit, Clients, STOP ALL).
 
 **Phase 2 — Desktop voice**
 Spike sherpa-onnx vs Vosk on the real laptop and decide; capture, VAD, grammar/hotword commands
-with context-aware grammars, dictation slots, OS TTS, `listen` + hotkey, optional wake word,
+with context-aware grammars, dictation slots, OS TTS, `listen` (Enter pauses; a global hotkey comes with the tray app), optional wake word,
 speaker verification for voice confirms, semantic match stage, Wyoming adapter, persona reply
 templates, stop-on-wake-word barge-in.
 *Done when:* "open firefox" by voice works within budget on the real laptop.
@@ -967,6 +967,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-24 | `assist-voice` crate: `Mic` reads on its own thread and hands out 16 kHz mono chunks through bounded queues (drops and counts when the reader lags); `Segmenter` turns them into Start / Audio / End events with a 1 s pre-roll behind a `Detector` trait (Silero via sherpa-onnx, fakes in tests). Static CRT on Windows; ALSA headers in Linux CI; sherpa-onnx build-script licences (bzip2, CC0/MIT-0, CDLA-Permissive) allowed per crate in deny.toml |
 | 2026-11-24 | Speech to text: `Recognizer` (Kroko streaming, greedy, 2 threads) decodes while audio arrives; `Transcript::finish` feeds 2 s of static zeros and returns the text. Models live in a models directory (`silero_vad.onnx`, Kroko directory); fetching them (download, sha256 check, unpack) lands with `assist listen`, where `assist` gets its models directory |
 | 2026-11-24 | Spoken replies: `Speaker` with `say` / `is_speaking` / `stop`. Windows uses WinRT `SpeechSynthesizer` + `MediaPlayer` through the `windows` crate (safe calls, no `unsafe`); playback starts 44 ms after `say` on the laptop (budget 500 ms). Linux runs `spd-say -w` as a process (speech-dispatcher stays unlinked); stop kills it and cancels the queue with `spd-say -C`. The `tts` crate was not used: it pins `windows` 0.58 and links speech-dispatcher |
+| 2026-11-24 | `assist listen` (feature `voice`, default on): hello `voice: true` lowers the connection to voice trust (only lowering is possible; shell denied, local-only rpcs refused). Half duplex: audio is ignored while paused (Enter) or while the reply is spoken. Models go to `<data dir>/models`, downloaded on first use after a terminal prompt, with curl (https only), checked against the published sha256 and unpacked with tar (both ship with Windows 10+ and Linux, so no new crate). Global push-to-talk hotkey deferred to the tray app: it needs a Windows message loop, i.e. unsafe code. RAM while listening: 214 MB (Kroko + VAD) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |
