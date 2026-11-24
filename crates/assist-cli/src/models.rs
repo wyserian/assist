@@ -75,14 +75,20 @@ pub async fn ensure(data: &Path) -> Result<PathBuf> {
 fn install(dir: &Path, model: &Model) -> Result<()> {
     let download = dir.join(format!("{}.part", model.file));
     let url = format!("{RELEASE}/{}", model.file);
+    // Connection resets on large release downloads are common: retry and resume the
+    // partial file. The sha256 check below still guards what ends up installed.
     let status = Command::new("curl")
         .args([
             "--fail",
             "--location",
-            "--silent",
-            "--show-error",
+            "--progress-bar",
             "--proto",
             "=https",
+            "--retry",
+            "5",
+            "--retry-all-errors",
+            "--continue-at",
+            "-",
         ])
         .arg("--output")
         .arg(&download)
