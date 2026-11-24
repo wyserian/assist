@@ -3,9 +3,11 @@
 //! own thread; this task only talks to the daemon.
 //!
 //! Speech counts only after the wake word ("hey Bee") or within [`AWAKE`] of the last
-//! exchange. The wake word or "stop" cuts a reply short (barge-in).
+//! exchange. The wake word or "stop" cuts a reply short (barge-in). With a voiceprint from
+//! `assist enroll`, each utterance is checked against it, and only the owner's "yes"
+//! confirms.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
@@ -15,8 +17,8 @@ use anyhow::{bail, Result};
 use assist_core::replies::{Line, Replies};
 use assist_proto::Reply;
 use assist_voice::{
-    Event, Keyword, Mic, Recognizer, Segmenter, Silero, Speaker, Spotter, VadSettings, VoiceError,
-    KWS_MODEL, STT_MODEL, VAD_MODEL,
+    Event, Keyword, Mic, Recognizer, Segmenter, Silero, Speaker, SpeakerModel, Spotter,
+    VadSettings, VoiceError, Voiceprint, KWS_MODEL, RATE, SPEAKER_MODEL, STT_MODEL, VAD_MODEL,
 };
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc as async_mpsc;
@@ -35,19 +37,36 @@ enum Heard {
     Ready(String),
     /// The wake word alone; the command comes next.
     Woke,
-    /// A finished utterance addressed to the assistant.
-    Text(String),
+    /// A finished utterance addressed to the assistant, with how close the voice is to the
+    /// owner's voiceprint (when there is one).
+    Text(String, Option<f32>),
     /// Voice stopped working.
     Failed(String),
+}
+
+/// What the voice thread needs.
+struct Setup {
+    models: PathBuf,
+    device: Option<String>,
+    wake: Vec<String>,
+    owner: Option<Voiceprint>,
 }
 
 /// Listens until Ctrl+C; Enter pauses and resumes the microphone.
 pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
     let config = crate::setup::load_config(paths)?;
     let replies = Replies::new(&config);
-    let wake = config.persona.wake_phrases();
-    let hint = wake.first().cloned().unwrap_or_default();
-    let models = crate::models::ensure(paths.data()).await?;
+    let threshold = config.voice.speaker_threshold;
+    let setup = Setup {
+        models: crate::models::ensure(paths.data()).await?,
+        device,
+        wake: config.persona.wake_phrases(),
+        owner: crate::enroll::load(paths.data())?,
+    };
+    let hint = setup.wake.first().cloned().unwrap_or_default();
+    if setup.owner.is_none() {
+        println!("No voiceprint: confirm calls and messages on screen, or run assist enroll.");
+    }
     let mut client = Client::connect(paths.data(), true).await?;
     println!("Loading voice models...");
 
@@ -58,14 +77,7 @@ pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
     let voice = std::thread::Builder::new()
         .name("assist-voice".into())
         .spawn(move || {
-            let result = voice_loop(
-                &models,
-                device.as_deref(),
-                &wake,
-                &thread_paused,
-                &heard_tx,
-                &say_rx,
-            );
+            let result = voice_loop(&setup, &thread_paused, &heard_tx, &say_rx);
             if let Err(e) = result {
                 let _ = heard_tx.blocking_send(Heard::Failed(e.to_string()));
             }
@@ -96,9 +108,13 @@ pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
                     println!("{}", printable(&line));
                     let _ = say_tx.try_send(line);
                 }
-                Some(Heard::Text(text)) => {
-                    println!("> {}", printable(&text));
-                    let reply = client.say(&text).await?;
+                Some(Heard::Text(text, score)) => {
+                    let verified = score.is_some_and(|score| score >= threshold);
+                    match score {
+                        Some(score) => println!("> {}  [voice {score:.2}]", printable(&text)),
+                        None => println!("> {}", printable(&text)),
+                    }
+                    let reply = client.say_as(&text, verified).await?;
                     show(&reply);
                     // A full queue means replies pile up faster than they are spoken; skip.
                     if !reply.say.is_empty() {
@@ -126,23 +142,26 @@ fn show(reply: &Reply) {
     }
 }
 
-/// Mic, wake word, VAD, recognition and speech, until `say` is closed or the receiver is
-/// gone.
+/// Mic, wake word, VAD, recognition, speaker check and speech, until `say` is closed or the
+/// receiver is gone.
 fn voice_loop(
-    models: &Path,
-    device: Option<&str>,
-    wake: &[String],
+    setup: &Setup,
     paused: &AtomicBool,
     heard: &async_mpsc::Sender<Heard>,
     say: &Receiver<String>,
 ) -> Result<(), VoiceError> {
+    let models: &Path = &setup.models;
     let settings = VadSettings::default();
     let vad = Silero::new(&models.join(VAD_MODEL), &settings)?;
     let mut segmenter = Segmenter::new(vad, &settings);
     let recognizer = Recognizer::new(&models.join(STT_MODEL))?;
-    let mut spotter = Spotter::new(&models.join(KWS_MODEL), wake)?;
+    let mut spotter = Spotter::new(&models.join(KWS_MODEL), &setup.wake)?;
+    let check = match &setup.owner {
+        Some(owner) => Some((SpeakerModel::new(&models.join(SPEAKER_MODEL))?, owner)),
+        None => None,
+    };
     let mut speaker = Speaker::new()?;
-    let mic = Mic::open(device)?;
+    let mic = Mic::open(setup.device.as_deref())?;
     if heard
         .blocking_send(Heard::Ready(mic.name().to_owned()))
         .is_err()
@@ -151,6 +170,8 @@ fn voice_loop(
     }
 
     let mut transcript = None;
+    // The utterance's audio for the speaker check; bounded by the VAD's longest utterance.
+    let mut utterance: Vec<f32> = Vec::with_capacity(RATE as usize * 15);
     let mut awake_until: Option<Instant> = None;
     // The wake word was heard in the current utterance.
     let mut woke = false;
@@ -189,14 +210,21 @@ fn voice_loop(
             // few tens of ms; upgrade to the spotter's timestamps if first words go missing.
             if segmenter.is_speaking() {
                 transcript = Some(recognizer.start());
+                utterance.clear();
             }
         }
         let mut gone = false;
         segmenter.push(&chunk, |event| match event {
-            Event::Start => transcript = Some(recognizer.start()),
+            Event::Start => {
+                transcript = Some(recognizer.start());
+                utterance.clear();
+            }
             Event::Audio(audio) => {
                 if let Some(t) = transcript.as_mut() {
                     t.feed(audio);
+                    if check.is_some() {
+                        utterance.extend_from_slice(audio);
+                    }
                 }
             }
             Event::End => {
@@ -204,7 +232,12 @@ fn voice_loop(
                 let addressed = awake_until.is_some_and(|until| until > Instant::now());
                 let message = if !text.is_empty() && addressed {
                     awake_until = Some(Instant::now() + AWAKE);
-                    Some(Heard::Text(text))
+                    let score = check.as_ref().map(|(model, owner)| {
+                        model
+                            .voiceprint(&utterance)
+                            .map_or(0.0, |print| owner.score(&print))
+                    });
+                    Some(Heard::Text(text, score))
                 } else if woke {
                     Some(Heard::Woke)
                 } else {

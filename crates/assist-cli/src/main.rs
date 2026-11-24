@@ -10,6 +10,8 @@ mod client;
 mod commands;
 mod daemon;
 mod display;
+#[cfg(feature = "voice")]
+mod enroll;
 mod keystore;
 #[cfg(feature = "voice")]
 mod listen;
@@ -82,6 +84,16 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
+    /// Record your voiceprint so a spoken "yes" can confirm calls and messages.
+    #[cfg(feature = "voice")]
+    Enroll {
+        /// Microphone whose name contains this text [default: as for listen].
+        #[arg(long)]
+        device: Option<String>,
+        /// Delete the voiceprint instead.
+        #[arg(long)]
+        forget: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -126,6 +138,8 @@ fn main() -> Result<ExitCode> {
             Command::Shell => repl::run(paths).await?,
             #[cfg(feature = "voice")]
             Command::Listen { device } => listen::run(&paths, device).await?,
+            #[cfg(feature = "voice")]
+            Command::Enroll { device, forget } => enroll::run(&paths, device, forget).await?,
         }
         Ok(ExitCode::SUCCESS)
     })

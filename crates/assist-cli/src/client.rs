@@ -75,8 +75,14 @@ impl Client {
 
     /// Sends text to this connection's conversation.
     pub async fn say(&mut self, text: &str) -> Result<Reply> {
+        self.say_as(text, false).await
+    }
+
+    /// Says something; `speaker_verified` when the voice matched the owner's voiceprint.
+    pub async fn say_as(&mut self, text: &str, speaker_verified: bool) -> Result<Reply> {
         let utterance = Utterance {
             text: text.to_owned(),
+            speaker_verified,
         };
         let sent = self.send(Kind::Utterance, utterance).await?;
         Ok(self.answer(sent).await?.body()?)

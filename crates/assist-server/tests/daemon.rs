@@ -285,6 +285,7 @@ async fn token_client_runs_and_inspects_jobs() {
         Kind::Utterance,
         Utterance {
             text: "$ echo hi".to_owned(),
+            speaker_verified: false,
         },
     )
     .await;
@@ -356,6 +357,7 @@ async fn voice_client_gets_voice_trust() {
     // Shell is denied for voice, and nothing local-only is allowed.
     let utterance = Utterance {
         text: "$ echo hi".to_owned(),
+        speaker_verified: false,
     };
     send(&mut ws, Kind::Utterance, utterance).await;
     let reply: Reply = recv(&mut ws).await.unwrap().body().unwrap();
@@ -440,6 +442,7 @@ async fn secrets_are_write_only_over_the_wire() {
         Kind::Utterance,
         Utterance {
             text: "$ echo sk-wire-test-12345678".to_owned(),
+            speaker_verified: false,
         },
     )
     .await;
@@ -465,6 +468,7 @@ async fn another_client_answers_a_waiting_question() {
 
     let text = Utterance {
         text: "make me a sandwich".to_owned(),
+        speaker_verified: false,
     };
     send(&mut asker, Kind::Utterance, text).await;
     let reply: Reply = recv(&mut asker).await.unwrap().body().unwrap();
@@ -508,6 +512,7 @@ async fn unmatched_sentences_become_phrases() {
     for _ in 0..2 {
         let text = Utterance {
             text: "find me rust tokio".to_owned(),
+            speaker_verified: false,
         };
         send(&mut ws, Kind::Utterance, text).await;
         let reply: Reply = recv(&mut ws).await.unwrap().body().unwrap();
@@ -517,6 +522,7 @@ async fn unmatched_sentences_become_phrases() {
             Kind::Utterance,
             Utterance {
                 text: "no".to_owned(),
+                speaker_verified: false,
             },
         )
         .await;
@@ -614,6 +620,7 @@ async fn settings_are_saved_and_risky_applies_at_once() {
     // Risky applies to the very next request.
     let text = Utterance {
         text: "$ echo hi".to_owned(),
+        speaker_verified: false,
     };
     send(&mut ws, Kind::Utterance, text).await;
     let reply: Reply = recv(&mut ws).await.unwrap().body().unwrap();

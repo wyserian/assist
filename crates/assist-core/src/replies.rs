@@ -43,6 +43,8 @@ pub enum Line {
     Declined,
     /// Neither yes nor no.
     YesOrNo,
+    /// A spoken "yes" from a voice that is not the owner's.
+    UnknownVoice,
     /// A correction that fits no slot; `{text}`.
     UnclearCorrection,
     /// Several matches; `{options}`.
@@ -53,7 +55,7 @@ pub enum Line {
 
 impl Line {
     /// Every line, for validation.
-    pub const ALL: [Line; 19] = [
+    pub const ALL: [Line; 20] = [
         Line::Greeting,
         Line::Wake,
         Line::NotUnderstood,
@@ -70,6 +72,7 @@ impl Line {
         Line::UnknownChoice,
         Line::Declined,
         Line::YesOrNo,
+        Line::UnknownVoice,
         Line::UnclearCorrection,
         Line::DidYouMean,
         Line::OtherOwner,
@@ -94,6 +97,7 @@ impl Line {
             Line::UnknownChoice => "unknown_choice",
             Line::Declined => "declined",
             Line::YesOrNo => "yes_or_no",
+            Line::UnknownVoice => "unknown_voice",
             Line::UnclearCorrection => "unclear_correction",
             Line::DidYouMean => "did_you_mean",
             Line::OtherOwner => "other_owner",

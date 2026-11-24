@@ -64,6 +64,7 @@ fn main() -> Result<()> {
         Some("eval") => eval(args.get(1).map(String::as_str)),
         Some("convert") => convert(args.get(1).context("missing file name prefix")?),
         Some("kws") => kws(&args[1..]),
+        Some("speaker") => speaker(),
         Some("wav") => {
             let (engine, path) = (args.get(1).context("engine")?, args.get(2).context("path")?);
             let wave = so::Wave::read(path).context("read wav")?;
@@ -680,6 +681,112 @@ fn kws(args: &[String]) -> Result<()> {
         }
     }
     println!("real-time factor {:.3}", total.as_secs_f32() / audio);
+    Ok(())
+}
+
+// ---- speaker verification ----
+
+const SPEAKER_MODELS: [&str; 2] = [
+    "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+    "wespeaker_en_voxceleb_resnet34.onnx",
+];
+
+/// Clips used to enrol the owner; the rest test them.
+const ENROL: usize = 5;
+
+fn embed(e: &so::SpeakerEmbeddingExtractor, samples: &[f32]) -> Option<Vec<f32>> {
+    let stream = e.create_stream()?;
+    stream.accept_waveform(RATE, samples);
+    stream.input_finished();
+    if !e.is_ready(&stream) {
+        return None;
+    }
+    let mut v = e.compute(&stream)?;
+    let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    v.iter_mut().for_each(|x| *x /= norm);
+    Some(v)
+}
+
+fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+fn summary(name: &str, scores: &[f32]) {
+    let mut s = scores.to_vec();
+    s.sort_by(f32::total_cmp);
+    if s.is_empty() {
+        return;
+    }
+    println!(
+        "  {name:<16} n={:>3} min {:.2} median {:.2} max {:.2}",
+        s.len(),
+        s[0],
+        s[s.len() / 2],
+        s[s.len() - 1]
+    );
+}
+
+/// Owner's clips against other voices for each speaker model: long = whole utterance,
+/// short = the last second of speech, about a spoken "yes".
+fn speaker() -> Result<()> {
+    let clips = load_clips(cases()?.len())?;
+    let others_dir = root().join("clips").join("others");
+    let mut others: Vec<(bool, Vec<f32>)> = Vec::new();
+    for entry in std::fs::read_dir(&others_dir)? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|x| x != "wav") {
+            continue;
+        }
+        let n: usize = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.rsplit_once('-'))
+            .and_then(|(_, n)| n.parse().ok())
+            .unwrap_or(0);
+        let wave = so::Wave::read(&path.to_string_lossy()).context("read wav")?;
+        // Sentences 23.. are the short answers ("yes", "yeah", ...).
+        others.push((n > 22, wave.samples().to_vec()));
+    }
+    for model_file in SPEAKER_MODELS {
+        let mut c = so::SpeakerEmbeddingExtractorConfig::default();
+        c.model = model(model_file);
+        c.num_threads = 1;
+        let loaded = Instant::now();
+        let e = so::SpeakerEmbeddingExtractor::create(&c).context("create extractor")?;
+        println!("== {model_file} (dim {}, load {} ms)", e.dim(), loaded.elapsed().as_millis());
+        let enrol: Vec<Vec<f32>> = clips[..ENROL].iter().filter_map(|c| embed(&e, &c.speech)).collect();
+        let mut owner = vec![0.0; enrol[0].len()];
+        for v in &enrol {
+            owner.iter_mut().zip(v).for_each(|(o, x)| *o += x);
+        }
+        let norm = owner.iter().map(|x| x * x).sum::<f32>().sqrt();
+        owner.iter_mut().for_each(|x| *x /= norm);
+
+        let started = Instant::now();
+        let mut count = 0;
+        let mut score = |samples: &[f32]| {
+            count += 1;
+            embed(&e, samples).map(|v| cosine(&owner, &v))
+        };
+        let own_long: Vec<f32> = clips[ENROL..].iter().filter_map(|c| score(&c.speech)).collect();
+        let own_short: Vec<f32> = clips[ENROL..]
+            .iter()
+            .filter_map(|c| score(&c.speech[c.speech.len().saturating_sub(RATE as usize)..]))
+            .collect();
+        let other_long: Vec<f32> = others.iter().filter(|o| !o.0).filter_map(|o| score(&o.1)).collect();
+        let other_short: Vec<f32> = others.iter().filter(|o| o.0).filter_map(|o| score(&o.1)).collect();
+        println!("  {} ms per embedding", started.elapsed().as_millis() / count.max(1) as u128);
+        summary("owner long", &own_long);
+        summary("owner 1 s", &own_short);
+        summary("others long", &other_long);
+        summary("others yes/no", &other_short);
+        // Errors at each threshold: owner refused, other accepted.
+        for t in [0.3, 0.4, 0.5, 0.6] {
+            let refused = own_long.iter().chain(&own_short).filter(|s| **s < t).count();
+            let accepted = other_long.iter().chain(&other_short).filter(|s| **s >= t).count();
+            println!("  threshold {t:.1}: owner refused {refused}/{}, others accepted {accepted}/{}", own_long.len() + own_short.len(), other_long.len() + other_short.len());
+        }
+    }
     Ok(())
 }
 

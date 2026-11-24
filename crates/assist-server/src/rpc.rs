@@ -274,7 +274,7 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
             require_local(conn)?;
             let answer: DialogAnswer = parse(params)?;
             if answer.client == conn.id {
-                return Ok(RpcResult::ok(conn.converse(&answer.text)));
+                return Ok(RpcResult::ok(conn.converse(&answer.text, true)));
             }
             let reply = conn
                 .state

@@ -59,6 +59,28 @@ pub struct Config {
     /// Reply lines that replace the defaults, keyed as in `phrases/en/replies.toml`.
     #[serde(default)]
     pub replies: BTreeMap<String, String>,
+    /// Voice input.
+    #[serde(default)]
+    pub voice: VoiceConfig,
+}
+
+/// `[voice]`: voice input settings.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct VoiceConfig {
+    /// How close (0 to 1) an utterance must be to the owner's voiceprint to count as the
+    /// owner. Higher refuses others more surely and the owner more often.
+    pub speaker_threshold: f32,
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        // Phase 2 spike: the owner's 1 s answers scored 0.26 to 0.71, other voices at most
+        // 0.12 (PLAN.md section 13).
+        Self {
+            speaker_threshold: 0.35,
+        }
+    }
 }
 
 /// `[persona]`: the assistant's name and how it addresses the owner.
@@ -279,6 +301,11 @@ impl Config {
             return Err(ConfigError::Invalid(format!(
                 "[replies] {key} is not a known reply"
             )));
+        }
+        if !(0.0..1.0).contains(&config.voice.speaker_threshold) {
+            return Err(ConfigError::Invalid(
+                "[voice] speaker_threshold must be at least 0 and below 1".to_owned(),
+            ));
         }
         if !config.server.bind.ip().is_loopback() {
             return Err(ConfigError::Invalid(

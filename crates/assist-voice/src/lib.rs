@@ -1,5 +1,6 @@
 //! Voice (PLAN.md Phase 2): microphone capture, voice activity detection, utterance
-//! segmentation, wake word, streaming speech to text and spoken replies through the OS voice.
+//! segmentation, wake word, streaming speech to text, speaker verification and spoken replies
+//! through the OS voice.
 //!
 //! Audio never reaches the async runtime: [`Mic`] reads on its own thread and hands out
 //! 16 kHz mono chunks; [`Segmenter`] turns them into [`Event`]s on the caller's thread.
@@ -12,6 +13,7 @@ mod speak;
 #[cfg(windows)]
 #[path = "speak_windows.rs"]
 mod speak;
+mod speaker;
 mod stt;
 mod vad;
 mod wake;
@@ -21,6 +23,7 @@ use std::path::PathBuf;
 pub use capture::{input_devices, Mic};
 pub use segment::{Event, Segmenter, PRE_ROLL};
 pub use speak::Speaker;
+pub use speaker::{SpeakerModel, Voiceprint};
 pub use stt::{Recognizer, Transcript};
 pub use vad::{Detector, Silero, VadSettings};
 pub use wake::{Keyword, Spotter};
@@ -35,6 +38,10 @@ pub const VAD_MODEL: &str = "silero_vad.onnx";
 /// accurate in the Phase 2 spike. Its licence is unclear, so it is downloaded by the user,
 /// never bundled (PLAN.md section 12).
 pub const STT_MODEL: &str = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06";
+
+/// The speaker verification model file inside the models directory: 3D-Speaker CAM++
+/// (Apache-2.0), the clearer of two in the Phase 2 spike.
+pub const SPEAKER_MODEL: &str = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx";
 
 /// The keyword spotting model directory inside the models directory (Apache-2.0).
 pub const KWS_MODEL: &str = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01";

@@ -45,6 +45,11 @@ name = "Bee"
 address = "Prime"
 wake_word = ""          # "" for "hey Bee" / "okay Bee"; e.g. "bumblebee" if Bee wakes by mistake
 
+# Voice input. After assist enroll, a spoken "yes" confirms only when the voice is at least
+# this close (0 to 1) to your voiceprint; raise it if others get through, lower it if you don't.
+[voice]
+speaker_threshold = 0.35
+
 # Reword any reply; keys and defaults are in config/phrases/en/replies.toml.
 [replies]
 not_understood = "Sorry {address}, please say that again."

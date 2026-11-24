@@ -5,7 +5,7 @@
 //! ACL of its parent.
 
 use std::fs::{DirBuilder, File, OpenOptions};
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 
 /// Creates `path` and missing parents, owner-only.
@@ -30,4 +30,17 @@ pub fn open_append(path: &Path) -> io::Result<File> {
         options.mode(0o600);
     }
     options.open(path)
+}
+
+/// Replaces `path` with `bytes` owner-only and atomically: a temporary file, then a rename.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = Path::new(&tmp);
+    let _ = std::fs::remove_file(tmp);
+    let mut file = open_append(tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(tmp, path)
 }

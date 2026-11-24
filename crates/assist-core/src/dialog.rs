@@ -15,7 +15,7 @@ use crate::config::{Config, ConfigError};
 use crate::matcher::{BuildError, Intent, Matcher, RuleMatcher, SlotType};
 use crate::normalize::{normalize, parse_number};
 use crate::phrases::{CommandSpec, PhraseSet};
-use crate::policy::{Capability, Decision, Policy, Principal, Request};
+use crate::policy::{Capability, Decision, Policy, Principal, Request, Trust};
 use crate::replies::{Line, Replies};
 
 /// The built-in command for `$ ...` input; its slot `command` holds the exact text.
@@ -391,6 +391,8 @@ pub struct Dialog {
     queue: VecDeque<Intent>,
     last: Option<Intent>,
     deadline: Option<Instant>,
+    /// The current input is vouched for by the owner (see [`Dialog::handle_vouched`]).
+    vouched: bool,
 }
 
 impl Dialog {
@@ -403,6 +405,7 @@ impl Dialog {
             queue: VecDeque::new(),
             last: None,
             deadline: None,
+            vouched: false,
         }
     }
 
@@ -420,6 +423,20 @@ impl Dialog {
 
     /// Handles one input at time `now`.
     pub fn handle(&mut self, principal: &Principal, input: &str, now: Instant) -> Reply {
+        self.handle_vouched(principal, input, false, now)
+    }
+
+    /// Like [`Dialog::handle`]. `vouched` says the owner stands behind this input: a voice
+    /// that matched the owner's voiceprint, or an answer from a local user on the dashboard.
+    /// A voice conversation's "yes" counts only when vouched (PLAN.md section 3.4).
+    pub fn handle_vouched(
+        &mut self,
+        principal: &Principal,
+        input: &str,
+        vouched: bool,
+        now: Instant,
+    ) -> Reply {
+        self.vouched = vouched;
         let mut reply = Reply::default();
         let raw = input.trim();
         if raw.is_empty() {
@@ -691,6 +708,11 @@ impl Dialog {
 
     fn confirm(&mut self, plan: Plan, intent: Option<Intent>, norm: &str, reply: &mut Reply) {
         if YES.contains(&norm) {
+            if self.owner.trust == Trust::Voice && !self.vouched {
+                reply.say.push(self.engine.say(Line::UnknownVoice, &[]));
+                self.state = State::Confirming { plan, intent };
+                return;
+            }
             self.submit(plan, intent, reply);
             return self.next(reply);
         }
@@ -753,7 +775,7 @@ fn options(candidates: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy::{Capability as C, Trust};
+    use crate::policy::Capability as C;
 
     const CONFIG: &str = r#"
 [apps]
@@ -912,6 +934,25 @@ risky = true
         assert_eq!(reply.missed.as_deref(), Some("make me a sandwich"));
         let reply = dialog.handle(&owner, "open firefox", Instant::now());
         assert_eq!(reply.missed, None);
+    }
+
+    #[test]
+    fn voice_yes_counts_only_when_vouched() {
+        let engine = engine(true, commands());
+        let owner = Principal::voice("voice");
+        let mut dialog = Dialog::new(engine, owner.clone());
+        let now = Instant::now();
+        let question = dialog.handle(&owner, "call mom", now);
+        assert_eq!(question.say, ["Call mom (+910000000000)?"]);
+        let refused = dialog.handle(&owner, "yes", now);
+        assert_eq!(
+            refused.say,
+            ["Sorry Prime, I don't recognise your voice. Confirm on screen."]
+        );
+        assert!(refused.run.is_empty());
+        assert!(dialog.is_waiting());
+        let vouched = dialog.handle_vouched(&owner, "yes", true, now);
+        assert_eq!(vouched.run.len(), 1);
     }
 
     #[test]

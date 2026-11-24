@@ -26,6 +26,10 @@ pub struct Hello {
 pub struct Utterance {
     /// What the user typed or said.
     pub text: String,
+    /// The voice matched the owner's voiceprint, so a spoken "yes" counts. Only a client
+    /// that already holds the token can send this, so it grants nothing it could not do.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub speaker_verified: bool,
 }
 
 /// [`crate::Kind::Reply`]: the assistant's answer.

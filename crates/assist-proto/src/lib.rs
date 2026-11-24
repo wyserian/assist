@@ -167,6 +167,7 @@ mod tests {
             "hub",
             Utterance {
                 text: "open firefox".to_owned(),
+                speaker_verified: false,
             },
         )
         .in_conversation(Uuid::new_v4());

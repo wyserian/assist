@@ -70,7 +70,7 @@ pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Cred
             Some(answer) = answers.recv() => {
                 // Answered elsewhere: handled as if this client typed it, so its jobs run
                 // in its directory and it follows them.
-                let reply = conn.converse(&answer.text);
+                let reply = conn.converse(&answer.text, true);
                 let _ = answer.reply.send(reply.clone());
                 vec![Envelope::new(Kind::Reply, HUB, &conn.peer, reply)]
             }
@@ -107,7 +107,7 @@ impl Conn {
                 Err(err) => vec![bad_request(&message, &err)],
             },
             Kind::Utterance => match message.body::<Utterance>() {
-                Ok(utterance) => vec![self.utterance(&message, &utterance.text)],
+                Ok(utterance) => vec![self.utterance(&message, &utterance)],
                 Err(err) => vec![bad_request(&message, &err)],
             },
             Kind::Subscribe => match message.body::<Subscribe>() {
@@ -148,17 +148,19 @@ impl Conn {
         message.answer(Kind::Hello, HUB, ours)
     }
 
-    fn utterance(&mut self, message: &Envelope, text: &str) -> Envelope {
-        let reply = self.converse(text);
+    fn utterance(&mut self, message: &Envelope, utterance: &Utterance) -> Envelope {
+        let reply = self.converse(&utterance.text, utterance.speaker_verified);
         message.answer(Kind::Reply, HUB, reply)
     }
 
     /// Runs `text` through this client's dialog, starts the resulting jobs and publishes
-    /// the question it now waits on, if any.
-    pub(crate) fn converse(&mut self, text: &str) -> Reply {
+    /// the question it now waits on, if any. `vouched`: see `Dialog::handle_vouched`.
+    pub(crate) fn converse(&mut self, text: &str, vouched: bool) -> Reply {
         let engine = self.state.services.engine.get();
         self.dialog.use_engine(Arc::clone(&engine));
-        let reply = self.dialog.handle(&self.principal, text, Instant::now());
+        let reply = self
+            .dialog
+            .handle_vouched(&self.principal, text, vouched, Instant::now());
         if let Some(missed) = &reply.missed {
             self.state.services.store.record_miss(missed);
         }

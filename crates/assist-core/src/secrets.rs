@@ -7,7 +7,7 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
@@ -161,15 +161,10 @@ impl Secrets {
         self.meta.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Writes the metadata atomically: a temporary file, then a rename.
+    /// Writes the metadata atomically.
     fn save(&self, meta: &BTreeMap<String, SecretInfo>) -> Result<(), SecretError> {
-        let tmp = self.meta_path.with_extension("json.tmp");
-        let _ = std::fs::remove_file(&tmp);
-        let mut file = private_fs::open_append(&tmp)?;
-        file.write_all(&serde_json::to_vec_pretty(meta).map_err(io::Error::from)?)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&tmp, &self.meta_path)?;
+        let json = serde_json::to_vec_pretty(meta).map_err(io::Error::from)?;
+        private_fs::write_atomic(&self.meta_path, &json)?;
         Ok(())
     }
 }

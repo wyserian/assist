@@ -8,7 +8,7 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use assist_core::private_fs::create_dir;
-use assist_voice::{KWS_MODEL, STT_MODEL, VAD_MODEL};
+use assist_voice::{KWS_MODEL, SPEAKER_MODEL, STT_MODEL, VAD_MODEL};
 use sha2::{Digest, Sha256};
 
 const RELEASES: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download";
@@ -26,7 +26,7 @@ struct Model {
     licence: &'static str,
 }
 
-const MODELS: [Model; 3] = [
+const MODELS: [Model; 4] = [
     Model {
         installed: VAD_MODEL,
         release: "asr-models",
@@ -50,6 +50,15 @@ const MODELS: [Model; 3] = [
         // The release page publishes no digest; this is the file as first downloaded.
         sha256: "f170013b4716e41b62b9bfd809687c207cef798ef9bc6534d524e17af9b6561a",
         size_mb: 18,
+        licence: "Apache-2.0",
+    },
+    Model {
+        installed: SPEAKER_MODEL,
+        release: "speaker-recongition-models",
+        file: SPEAKER_MODEL,
+        // The release page publishes no digest; this is the file as first downloaded.
+        sha256: "98daf9bcf1c8abf3db374fec4c27a5eda7c58705bb3f180d057b085a72a88bb5",
+        size_mb: 30,
         licence: "Apache-2.0",
     },
 ];
