@@ -177,6 +177,9 @@ pub struct JobSummary {
     /// Why it failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The first job of the pipe this job is a stage of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<u64>,
 }
 
 #[cfg(test)]

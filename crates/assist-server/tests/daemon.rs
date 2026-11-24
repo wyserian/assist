@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use assist_core::action::{Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest};
+use assist_core::action::{
+    Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest, PipeShape,
+};
 use assist_core::audit::Audit;
 use assist_core::config::Config;
 use assist_core::dialog::{Engine, LiveEngine, SHELL};
@@ -43,6 +45,7 @@ static ECHO: Manifest = Manifest {
     capabilities: &[Capability::Shell],
     owner_defined: false,
     lane: Lane::Interactive,
+    pipe: PipeShape::SOURCE,
 };
 
 impl Action for Echo {

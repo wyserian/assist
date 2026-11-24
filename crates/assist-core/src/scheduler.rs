@@ -1,7 +1,9 @@
 //! Jobs and lanes (PLAN.md section 3.8).
 //!
 //! Every confirmed [`Plan`] becomes a job. Jobs run in parallel, limited per lane, each with
-//! a timeout, a bounded output tail and a cancel token. State changes and output are
+//! a timeout, a bounded output tail and a cancel token. A pipe is a group of jobs, one per
+//! stage, whose lines flow from stage to stage; the group takes one lane slot, and stopping
+//! any stage stops the pipe. State changes and output are
 //! broadcast as [`JobEvent`]s and every state change is audited. Only the most recent
 //! [`KEEP_FINISHED`] finished jobs stay in memory.
 
@@ -11,9 +13,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::sync::{broadcast, mpsc, Semaphore};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use crate::action::{Action, ActionError, Chunk, JobCtx, Lane};
+use crate::action::{Action, ActionError, Chunk, Input, JobCtx, Lane, Output};
 use crate::audit::{now_ms, Audit, AuditRecord};
 use crate::config::Config;
 use crate::dialog::{CommandInfo, Plan};
@@ -29,6 +32,8 @@ pub type JobId = u64;
 pub const KEEP_FINISHED: usize = 100;
 
 const OUTPUT_BUFFER: usize = 256;
+/// Lines waiting between two pipe stages; a full buffer makes the earlier stage wait.
+const PIPE_BUFFER: usize = 256;
 const EVENT_BUFFER: usize = 1024;
 
 pub use assist_proto::JobState;
@@ -56,6 +61,8 @@ pub struct JobInfo {
     pub finished: Option<u64>,
     /// Why it failed.
     pub error: Option<ActionError>,
+    /// The first job of the pipe this job is a stage of.
+    pub group: Option<JobId>,
 }
 
 impl JobInfo {
@@ -72,6 +79,7 @@ impl JobInfo {
             started: self.started,
             finished: self.finished,
             error: self.error.as_ref().map(|e| e.message.clone()),
+            group: self.group,
         }
     }
 }
@@ -112,6 +120,9 @@ pub enum SubmitError {
     /// No action is registered for the plan's command.
     #[error("no action for command {0}")]
     UnknownCommand(String),
+    /// A pipe with no stages, or a different number of titles.
+    #[error("empty pipe")]
+    EmptyPipe,
 }
 
 /// Runs jobs. Cheap to clone; clones share all state.
@@ -188,6 +199,7 @@ impl Scheduler {
                 let info = CommandInfo {
                     capabilities: manifest.capabilities.to_vec(),
                     owner_defined: manifest.owner_defined,
+                    pipe: manifest.pipe,
                 };
                 (name.clone(), info)
             })
@@ -202,54 +214,87 @@ impl Scheduler {
         title: String,
         cwd: PathBuf,
     ) -> Result<JobId, SubmitError> {
+        let ids = self.submit_pipe(vec![(plan, title)], principal, cwd)?;
+        ids.first().copied().ok_or(SubmitError::EmptyPipe)
+    }
+
+    /// Queues a confirmed pipe, one `(plan, title)` per stage, and returns the stages' job
+    /// ids. The dialog has checked that each stage's input fits the previous output.
+    pub fn submit_pipe(
+        &self,
+        stages: Vec<(Plan, String)>,
+        principal: Principal,
+        cwd: PathBuf,
+    ) -> Result<Vec<JobId>, SubmitError> {
         let inner = &self.inner;
-        let action = inner
-            .actions
-            .get(&plan.command)
-            .cloned()
-            .ok_or_else(|| SubmitError::UnknownCommand(plan.command.clone()))?;
-        let lane = action.lane(&plan, &inner.config);
-        let id = inner.next_id.fetch_add(1, Ordering::Relaxed);
-        let cancel = CancellationToken::new();
-        let info = JobInfo {
-            id,
-            command: plan.command.clone(),
-            title: inner.redact(&title).into_owned(),
-            principal: principal.clone(),
-            lane,
-            state: JobState::Queued,
-            created: now_ms(),
-            started: None,
-            finished: None,
-            error: None,
+        let actions = stages
+            .iter()
+            .map(|(plan, _)| {
+                inner
+                    .actions
+                    .get(&plan.command)
+                    .cloned()
+                    .ok_or_else(|| SubmitError::UnknownCommand(plan.command.clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let (Some(first_plan), Some(first_action)) =
+            (stages.first().map(|(plan, _)| plan), actions.first())
+        else {
+            return Err(SubmitError::EmptyPipe);
         };
-        if let Some(store) = &inner.store {
-            store.insert(&info);
+        // The pipe runs in the lane of its first stage, the one that does the real work.
+        let lane = first_action.lane(first_plan, &inner.config);
+        let group_cancel = CancellationToken::new();
+        let piped = stages.len() > 1;
+        let mut group = None;
+        let mut run = Vec::with_capacity(stages.len());
+        for ((plan, title), action) in stages.into_iter().zip(actions) {
+            let id = inner.next_id.fetch_add(1, Ordering::Relaxed);
+            let group_id = *group.get_or_insert(id);
+            let info = JobInfo {
+                id,
+                command: plan.command.clone(),
+                title: inner.redact(&title).into_owned(),
+                principal: principal.clone(),
+                lane,
+                state: JobState::Queued,
+                created: now_ms(),
+                started: None,
+                finished: None,
+                error: None,
+                group: piped.then_some(group_id),
+            };
+            if let Some(store) = &inner.store {
+                store.insert(&info);
+            }
+            inner.jobs().insert(
+                id,
+                Slot {
+                    info,
+                    // Stopping any stage stops the whole pipe.
+                    cancel: group_cancel.clone(),
+                    tail: VecDeque::new(),
+                    tail_bytes: 0,
+                },
+            );
+            inner.audit(id, "submitted");
+            inner.emit(JobEvent::State {
+                id,
+                state: JobState::Queued,
+            });
+            let ctx = JobCtx {
+                job: id,
+                plan,
+                principal: principal.clone(),
+                config: Arc::clone(&inner.config),
+                cwd: cwd.clone(),
+                cancel: group_cancel.child_token(),
+            };
+            run.push((action, ctx));
         }
-        inner.jobs().insert(
-            id,
-            Slot {
-                info,
-                cancel: cancel.clone(),
-                tail: VecDeque::new(),
-                tail_bytes: 0,
-            },
-        );
-        inner.audit(id, "submitted");
-        inner.emit(JobEvent::State {
-            id,
-            state: JobState::Queued,
-        });
-        let ctx = JobCtx {
-            job: id,
-            plan,
-            principal,
-            config: Arc::clone(&inner.config),
-            cwd,
-            cancel,
-        };
-        tokio::spawn(run_job(Arc::clone(inner), action, ctx, lane));
-        Ok(id)
+        let ids = run.iter().map(|(_, ctx)| ctx.job).collect();
+        tokio::spawn(run_pipe(Arc::clone(inner), run, lane, group_cancel));
+        Ok(ids)
     }
 
     /// Stops a queued or running job. Returns false if it does not exist or already ended.
@@ -313,20 +358,63 @@ impl Scheduler {
     }
 }
 
-async fn run_job(inner: Arc<Inner>, action: Arc<dyn Action>, ctx: JobCtx, lane: Lane) {
-    let id = ctx.job;
-    let cancel = ctx.cancel.clone();
-    let Some(semaphore) = inner.lanes.get(&lane).cloned() else {
-        return inner.finish(id, JobState::Failed, Some(ActionError::new("no such lane")));
-    };
-    let permit = tokio::select! {
-        biased;
-        _ = cancel.cancelled() => None,
-        permit = semaphore.acquire_owned() => permit.ok(),
+/// Runs a pipe's stages together once its lane has room; one slot for the whole group, so
+/// a long pipe never waits on itself.
+async fn run_pipe(
+    inner: Arc<Inner>,
+    stages: Vec<(Arc<dyn Action>, JobCtx)>,
+    lane: Lane,
+    group: CancellationToken,
+) {
+    let semaphore = inner.lanes.get(&lane).cloned();
+    let permit = match semaphore {
+        Some(semaphore) => tokio::select! {
+            biased;
+            _ = group.cancelled() => None,
+            permit = semaphore.acquire_owned() => permit.ok(),
+        },
+        None => None,
     };
     let Some(_permit) = permit else {
-        return inner.finish(id, JobState::Cancelled, None);
+        for (_, ctx) in &stages {
+            inner.finish(ctx.job, JobState::Cancelled, None);
+        }
+        return;
     };
+    let mut tasks = JoinSet::new();
+    let (closed, mut input) = mpsc::channel(1);
+    drop(closed);
+    let last = stages.len().saturating_sub(1);
+    for (i, (action, ctx)) in stages.into_iter().enumerate() {
+        let (next, next_input) = if i < last {
+            let (tx, rx) = mpsc::channel(PIPE_BUFFER);
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+        let stage = run_stage(Arc::clone(&inner), action, ctx, input, next, group.clone());
+        tasks.spawn(stage);
+        if let Some(rx) = next_input {
+            input = rx;
+        } else {
+            break;
+        }
+    }
+    while tasks.join_next().await.is_some() {}
+}
+
+/// Runs one stage. Its lines go to `next` when there is a next stage, else to the job's
+/// output. A failed or timed-out stage stops the rest of the pipe.
+async fn run_stage(
+    inner: Arc<Inner>,
+    action: Arc<dyn Action>,
+    ctx: JobCtx,
+    input: Input,
+    next: Option<Output>,
+    group: CancellationToken,
+) {
+    let id = ctx.job;
+    let cancel = ctx.cancel.clone();
     inner.update(id, |info| {
         info.state = JobState::Running;
         info.started = Some(now_ms());
@@ -337,8 +425,6 @@ async fn run_job(inner: Arc<Inner>, action: Arc<dyn Action>, ctx: JobCtx, lane: 
         state: JobState::Running,
     });
 
-    let (input_tx, input) = mpsc::channel(1);
-    drop(input_tx);
     let (out, mut output) = mpsc::channel(OUTPUT_BUFFER);
     let mut work = action.run(ctx, input, out);
     let deadline = tokio::time::sleep(inner.config.jobs.timeout);
@@ -348,10 +434,17 @@ async fn run_job(inner: Arc<Inner>, action: Arc<dyn Action>, ctx: JobCtx, lane: 
             biased;
             _ = cancel.cancelled() => break (JobState::Cancelled, None),
             _ = &mut deadline => break (JobState::TimedOut, None),
-            Some(chunk) = output.recv() => inner.output(id, chunk),
+            Some(chunk) = output.recv() => {
+                if !pass(&inner, id, next.as_ref(), chunk).await {
+                    // The next stage stopped reading (`head` is done): this stage is done.
+                    break (JobState::Done, None);
+                }
+            }
             result = &mut work => {
                 while let Ok(chunk) = output.try_recv() {
-                    inner.output(id, chunk);
+                    if !pass(&inner, id, next.as_ref(), chunk).await {
+                        break;
+                    }
                 }
                 break match result {
                     Ok(()) => (JobState::Done, None),
@@ -360,10 +453,29 @@ async fn run_job(inner: Arc<Inner>, action: Arc<dyn Action>, ctx: JobCtx, lane: 
             }
         }
     };
-    // Dropping the future stops the action and kills its processes if it is still running.
+    // Dropping the future stops the action and kills its processes if it is still running;
+    // dropping `next` ends the next stage's input.
     drop(work);
+    // A failure stops the later stages before their input ends, so they end Cancelled
+    // instead of finishing on partial input.
+    if matches!(state, JobState::Failed | JobState::TimedOut) {
+        group.cancel();
+    }
+    drop(next);
     cancel.cancel();
     inner.finish(id, state, error);
+}
+
+/// Hands a chunk on: lines to the next stage when there is one, everything else to the
+/// job's own output. `false` once the next stage is gone.
+async fn pass(inner: &Inner, id: JobId, next: Option<&Output>, chunk: Chunk) -> bool {
+    match (next, chunk) {
+        (Some(next), Chunk::Line(line)) => next.send(Chunk::Line(line)).await.is_ok(),
+        (_, chunk) => {
+            inner.output(id, chunk);
+            true
+        }
+    }
 }
 
 impl Inner {
@@ -479,7 +591,7 @@ impl Inner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::{BoxFuture, Input, Manifest, Output};
+    use crate::action::{BoxFuture, Input, Manifest, Output, PipeShape};
 
     #[derive(Clone, Copy)]
     enum Behavior {
@@ -487,6 +599,12 @@ mod tests {
         Fail,
         Wait,
         Leak,
+        /// Numbered lines until the next stage stops reading.
+        Endless,
+        /// Transform: input lines in upper case.
+        Upper,
+        /// Transform: the first input line only.
+        First,
     }
 
     struct Fake {
@@ -502,6 +620,12 @@ mod tests {
                     capabilities: &[],
                     owner_defined: false,
                     lane: Lane::Interactive,
+                    pipe: match behavior {
+                        Behavior::Upper | Behavior::First => {
+                            PipeShape::transform(crate::action::DataKind::Lines, None)
+                        }
+                        _ => PipeShape::SOURCE,
+                    },
                 },
                 behavior,
             })
@@ -516,7 +640,7 @@ mod tests {
         fn run(
             &self,
             ctx: JobCtx,
-            _input: Input,
+            mut input: Input,
             out: Output,
         ) -> BoxFuture<Result<(), ActionError>> {
             let behavior = self.behavior;
@@ -538,6 +662,26 @@ mod tests {
                         ctx.cancel.cancelled().await;
                         Ok(())
                     }
+                    Behavior::Endless => {
+                        for i in 0.. {
+                            if out.send(Chunk::Line(i.to_string())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Ok(())
+                    }
+                    Behavior::Upper => {
+                        while let Some(Chunk::Line(line)) = input.recv().await {
+                            let _ = out.send(Chunk::Line(line.to_uppercase())).await;
+                        }
+                        Ok(())
+                    }
+                    Behavior::First => {
+                        if let Some(chunk) = input.recv().await {
+                            let _ = out.send(chunk).await;
+                        }
+                        Ok(())
+                    }
                 }
             })
         }
@@ -548,6 +692,9 @@ mod tests {
             Fake::action("echo", Behavior::Echo),
             Fake::action("fail", Behavior::Fail),
             Fake::action("wait", Behavior::Wait),
+            Fake::action("endless", Behavior::Endless),
+            Fake::action("upper", Behavior::Upper),
+            Fake::action("first", Behavior::First),
         ];
         Scheduler::new(
             actions,
@@ -570,6 +717,61 @@ mod tests {
                 PathBuf::from("."),
             )
             .unwrap()
+    }
+
+    fn pipe(scheduler: &Scheduler, commands: &[&str]) -> Vec<JobId> {
+        let stages = commands
+            .iter()
+            .map(|command| {
+                let plan = Plan {
+                    command: (*command).to_owned(),
+                    slots: BTreeMap::new(),
+                    typed: false,
+                };
+                (plan, (*command).to_owned())
+            })
+            .collect();
+        scheduler
+            .submit_pipe(stages, Principal::local("test"), PathBuf::from("."))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn pipe_lines_flow_to_the_last_stage() {
+        let s = scheduler("");
+        let mut events = s.subscribe();
+        let ids = pipe(&s, &["echo", "upper"]);
+        assert_eq!(finished(&mut events, ids[1]).await, JobState::Done);
+        settle().await;
+        assert_eq!(s.tail(ids[1]).unwrap(), ["ONE", "TWO", "THREE"]);
+        assert!(s.tail(ids[0]).unwrap().is_empty());
+        assert_eq!(s.get(ids[0]).unwrap().state, JobState::Done);
+        assert_eq!(s.get(ids[1]).unwrap().group, Some(ids[0]));
+    }
+
+    #[tokio::test]
+    async fn a_stage_that_stops_reading_ends_the_ones_before() {
+        let s = scheduler("");
+        let mut events = s.subscribe();
+        let ids = pipe(&s, &["endless", "first"]);
+        assert_eq!(finished(&mut events, ids[0]).await, JobState::Done);
+        settle().await;
+        assert_eq!(s.tail(ids[1]).unwrap(), ["0"]);
+        assert_eq!(s.active(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_stage_cancels_the_rest_and_stop_stops_all() {
+        let s = scheduler("");
+        let mut events = s.subscribe();
+        let ids = pipe(&s, &["fail", "upper"]);
+        assert_eq!(finished(&mut events, ids[1]).await, JobState::Cancelled);
+        assert_eq!(s.get(ids[0]).unwrap().state, JobState::Failed);
+
+        let ids = pipe(&s, &["wait", "upper"]);
+        settle().await;
+        assert!(s.cancel(ids[1]));
+        assert_eq!(finished(&mut events, ids[0]).await, JobState::Cancelled);
     }
 
     async fn finished(events: &mut broadcast::Receiver<JobEvent>, id: JobId) -> JobState {
@@ -717,7 +919,7 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, SubmitError::UnknownCommand(ref c) if c == "fly"));
-        assert_eq!(s.commands().len(), 3);
+        assert_eq!(s.commands().len(), 6);
     }
 
     #[tokio::test]

@@ -4,7 +4,7 @@
 //! `firefox = { windows = "firefox.exe", linux = "firefox" }`.
 
 use assist_core::action::{
-    Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest, Output,
+    Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest, Output, PipeShape,
 };
 use assist_core::policy::Capability;
 
@@ -23,6 +23,7 @@ static MANIFEST: Manifest = Manifest {
     capabilities: &[Capability::Apps],
     owner_defined: false,
     lane: Lane::Interactive,
+    pipe: PipeShape::NONE,
 };
 
 impl Action for OpenApp {

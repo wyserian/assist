@@ -49,13 +49,21 @@ pub enum Line {
     UnclearCorrection,
     /// Several matches; `{options}`.
     DidYouMean,
+    /// A pipe stage that is no command; `{text}`.
+    BadStage,
+    /// A pipe that starts with a transform; `{text}`.
+    PipeStart,
+    /// A command after `|` that takes no input; `{text}`.
+    NoInput,
+    /// A transform after a command that writes no lines; `{text}`.
+    NoOutput,
     /// Input on a conversation another client owns; `{source}`.
     OtherOwner,
 }
 
 impl Line {
     /// Every line, for validation.
-    pub const ALL: [Line; 20] = [
+    pub const ALL: [Line; 24] = [
         Line::Greeting,
         Line::Wake,
         Line::NotUnderstood,
@@ -75,6 +83,10 @@ impl Line {
         Line::UnknownVoice,
         Line::UnclearCorrection,
         Line::DidYouMean,
+        Line::BadStage,
+        Line::PipeStart,
+        Line::NoInput,
+        Line::NoOutput,
         Line::OtherOwner,
     ];
 
@@ -100,6 +112,10 @@ impl Line {
             Line::UnknownVoice => "unknown_voice",
             Line::UnclearCorrection => "unclear_correction",
             Line::DidYouMean => "did_you_mean",
+            Line::BadStage => "bad_stage",
+            Line::PipeStart => "pipe_start",
+            Line::NoInput => "no_input",
+            Line::NoOutput => "no_output",
             Line::OtherOwner => "other_owner",
         }
     }

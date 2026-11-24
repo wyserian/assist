@@ -173,14 +173,22 @@ impl Conn {
             jobs: Vec::new(),
             waiting,
         };
-        for plan in reply.run {
-            let title = engine.readback(&plan);
-            match scheduler.submit(plan, self.principal.clone(), title, self.cwd.clone()) {
-                Ok(id) => {
-                    self.jobs.insert(id);
-                    // The scheduler's title has secrets redacted.
-                    let title = scheduler.get(id).map(|job| job.title).unwrap_or_default();
-                    answer.jobs.push(JobBrief { id, title });
+        for pipe in reply.run {
+            let stages = pipe
+                .into_iter()
+                .map(|plan| {
+                    let title = engine.readback(&plan);
+                    (plan, title)
+                })
+                .collect();
+            match scheduler.submit_pipe(stages, self.principal.clone(), self.cwd.clone()) {
+                Ok(ids) => {
+                    for id in ids {
+                        self.jobs.insert(id);
+                        // The scheduler's title has secrets redacted.
+                        let title = scheduler.get(id).map(|job| job.title).unwrap_or_default();
+                        answer.jobs.push(JobBrief { id, title });
+                    }
                 }
                 Err(err) => answer.say.push(err.to_string()),
             }

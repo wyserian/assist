@@ -11,7 +11,9 @@
 //!
 //! The command is passed to the shell as written, so quote paths that contain spaces.
 
-use assist_core::action::{Action, ActionError, BoxFuture, Input, JobCtx, Lane, Manifest, Output};
+use assist_core::action::{
+    Action, ActionError, BoxFuture, Input, JobCtx, Lane, Manifest, Output, PipeShape,
+};
 use assist_core::config::Config;
 use assist_core::dialog::Plan;
 use assist_core::policy::Capability;
@@ -26,6 +28,7 @@ static MANIFEST: Manifest = Manifest {
     capabilities: &[Capability::Shell],
     owner_defined: true,
     lane: Lane::Interactive,
+    pipe: PipeShape::SOURCE,
 };
 
 impl Action for RunScript {

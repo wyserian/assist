@@ -268,9 +268,16 @@ publish selected facts to the hub. (Built in Phase 3 together with its first con
 
 `ocr screen | filter error | telegram me`
 
-- Each stage is a job; the pipe is one job group. Data kinds are type-checked at parse time.
-- Built-in transforms: `filter`, `grep`, `map`, `count`, `sort`, `uniq`, `head`, `json`,
-  `save <path>` (`fs.write`), `post <url>` (`send`).
+- Each stage is a job; the pipe is one job group that takes one lane slot. Data kinds
+  (`Empty`, `Lines`) are type-checked at parse time. Stopping any stage stops the pipe; a failed
+  stage cancels the later ones; a stage that stops reading (`head`) ends the earlier ones.
+  Lines between stages are not logged, only the last stage's output.
+- `|` splits any input that does not start with `$` (`$ a | b` stays a system-shell pipe). A
+  transform is written `<name> <arg>` with the argument kept as typed; other stages are matched
+  like any command and must need no question.
+- Built-in transforms: `filter`, `grep`, `count`, `sort`, `uniq`, `head`, `save <path>`
+  (`fs.write`). Later: `map` and `json` (need an expression syntax), `post <url>` (`send`,
+  with the first HTTP action).
 - Control: `on_error = "<pipe>"`, `retry = N`, `if <fact condition>`. No visual editor.
 - Saved pipes are named commands in config.
 
@@ -979,6 +986,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Speaker verification: 3D-Speaker CAM++ (Apache-2.0, 30 MB, 43 ms per utterance; sha256 pinned from the first download) over WeSpeaker ResNet34, whose owner and other-voice scores overlapped. Spike (5 owner clips enrolled, 17 tested, 5 OS voices x 26 sentences): owner whole utterances 0.49-0.86, owner last 1 s 0.26-0.71, other voices -0.15-0.12; default `[voice] speaker_threshold = 0.35`. `assist enroll` reads 5 sentences and saves the averaged voiceprint to `<data>/voiceprint.txt` (user-only, atomic write; `--forget` deletes it). `listen` scores every utterance and sends `Utterance.speaker_verified`; a client sending it already holds the token, so it grants nothing new. Dialog: on a `Voice` conversation a "yes" confirms only when vouched for (verified voice, or a local dashboard answer); otherwise "I don't recognise your voice. Confirm on screen." and the question stays open. Without a voiceprint, voice can no longer confirm. Not yet measured: other people's real voices, which will score higher than the OS voices |
 | 2026-11-25 | Semantic stage deferred, filler words instead. The 32 recorded misses from real `listen` use were filler words before a valid command ("can you open ...", "okay so i'm gonna ...", "okay open firebox"), apps missing from `[apps]` (chrome, explorer, visual studio), recognition garbage and chatter; none was a paraphrase an embedding model would fix better. An embedding model also needs ONNX Runtime (`ort`, whose static build would clash with the onnxruntime inside sherpa's static library) and a tokenizer. The rule matcher now retries without leading/trailing filler words (as-said first, so fillers inside a text slot stay). Revisit with the miss log |
 | 2026-11-25 | Wyoming adapter deferred: Phase 2's done-when ("open firefox" by voice within budget) is met, the owner runs no Wyoming server, and a Piper voice through it would also need PCM playback. Built when a Wyoming server is wanted or with the Phase 9 room microphones. Phase 2 closes with release 0.3.0 |
+| 2026-11-25 | Pipes (Phase 3 step 1): `PipeShape { input, output, arg }` on every action manifest; transforms are actions in `assist-actions` (feature `transforms`) with a raw `<name> <arg>` syntax, because phrase matching normalizes text (paths, regexes). The scheduler runs a pipe as one task holding one lane slot (per-stage slots could deadlock a pipe longer than the lane), stages joined by bounded channels; a single job is a one-stage pipe. `JobSummary.group` marks stages (not persisted yet). `map`, `json` and `post` wait for an expression syntax and an HTTP action |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

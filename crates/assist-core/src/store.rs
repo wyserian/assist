@@ -225,7 +225,10 @@ impl Store {
         let before = before.map_or(i64::MAX, to_db);
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = query.query_map(params![before, limit], |row| {
+            // shortcut: the pipe group is not stored, so history shows stages as single
+            // jobs; add a column when the dashboard groups past pipes.
             Ok(JobSummary {
+                group: None,
                 id: from_db(row.get(0)?),
                 command: row.get(1)?,
                 title: row.get(2)?,
@@ -540,6 +543,7 @@ mod tests {
             started: Some(now),
             finished: state.is_finished().then_some(now),
             error: None,
+            group: None,
         }
     }
 

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use assist_proto::rpc::Explanation;
 
+use crate::action::{DataKind, PipeShape};
 use crate::config::{Config, ConfigError};
 use crate::matcher::{BuildError, Intent, Matcher, RuleMatcher, SlotType};
 use crate::normalize::{normalize, parse_number};
@@ -56,6 +57,8 @@ pub struct CommandInfo {
     /// The action only runs what the owner wrote in config (named scripts), so it counts
     /// as typed for the policy.
     pub owner_defined: bool,
+    /// How it fits in a pipe.
+    pub pipe: PipeShape,
 }
 
 /// Why an [`Engine`] could not be built.
@@ -203,6 +206,52 @@ impl Engine {
         }
     }
 
+    /// A pipe read back stage by stage: `run_script: script = build | count`.
+    pub fn readback_pipe(&self, pipe: &[Plan]) -> String {
+        let stages: Vec<String> = pipe.iter().map(|plan| self.readback(plan)).collect();
+        stages.join(" | ")
+    }
+
+    /// One pipe stage as a plan: a transform written `<name> <arg>`, or any command the
+    /// matcher fully resolves (no question to ask, no choice to make).
+    fn stage(&self, text: &str) -> Option<Plan> {
+        let (word, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+        let name = word.to_lowercase();
+        if let Some(info) = self.commands.get(&name).filter(|i| i.pipe.is_transform()) {
+            let rest = rest.trim();
+            let slots = info
+                .pipe
+                .arg
+                .filter(|_| !rest.is_empty())
+                .map(|slot| (slot.to_owned(), rest.to_owned()))
+                .into_iter()
+                .collect();
+            return Some(Plan {
+                command: name,
+                slots,
+                typed: false,
+            });
+        }
+        let intent = self.matcher.best(text)?;
+        if !intent.ambiguous.is_empty() || self.missing(&intent).is_some() {
+            return None;
+        }
+        Some(Plan {
+            command: intent.command,
+            slots: intent.slots,
+            typed: false,
+        })
+    }
+
+    /// The strictest decision over a pipe's stages; `None` if any stage is unavailable.
+    fn pipe_decision(&self, principal: &Principal, pipe: &[Plan]) -> Option<Decision> {
+        pipe.iter()
+            .map(|plan| self.decision(principal, plan))
+            .try_fold(Decision::Allow, |worst, decision| {
+                Some(worst.max(decision?))
+            })
+    }
+
     /// A slot value as a confirmation shows it: text quoted, a contact with its number, so
     /// the owner sees exactly what runs.
     fn shown(&self, command: &str, slot: &str, value: &str) -> String {
@@ -222,13 +271,14 @@ impl Engine {
         self.replies.line(line, vars)
     }
 
-    /// The confirmation question for `plan`: the command's own `confirm` line with shown
-    /// slot values, else the readback.
-    fn confirm_question(&self, plan: &Plan) -> String {
-        match self.command_line(plan, |spec| spec.confirm.as_deref(), true) {
-            Some(question) => question,
-            None => self.say(Line::Confirm, &[("action", &self.readback(plan))]),
-        }
+    /// The confirmation question for `pipe`: a single command's own `confirm` line with
+    /// shown slot values, else the readback.
+    fn confirm_question(&self, pipe: &[Plan]) -> String {
+        let own = match pipe {
+            [plan] => self.command_line(plan, |spec| spec.confirm.as_deref(), true),
+            _ => None,
+        };
+        own.unwrap_or_else(|| self.say(Line::Confirm, &[("action", &self.readback_pipe(pipe))]))
     }
 
     /// What is said when `plan` starts: the command's own `reply` line, else a short
@@ -327,8 +377,9 @@ impl Plan {
 pub struct Reply {
     /// Lines to show or speak, in order.
     pub say: Vec<String>,
-    /// Plans to schedule now, in order.
-    pub run: Vec<Plan>,
+    /// What to schedule now, in order: each entry is one plan, or the stages of a pipe whose
+    /// lines flow from one stage to the next.
+    pub run: Vec<Vec<Plan>>,
     /// The input, normalized, when it matched no command; callers record it so it can
     /// become a phrase.
     pub missed: Option<String>,
@@ -377,7 +428,8 @@ enum State {
         candidates: Vec<String>,
     },
     Confirming {
-        plan: Plan,
+        /// One plan, or the stages of a pipe.
+        pipe: Vec<Plan>,
         intent: Option<Intent>,
     },
 }
@@ -473,7 +525,7 @@ impl Dialog {
                 slot,
                 candidates,
             } => self.choose(intent, slot, candidates, &norm, &mut reply),
-            State::Confirming { plan, intent } => self.confirm(plan, intent, &norm, &mut reply),
+            State::Confirming { pipe, intent } => self.confirm(pipe, intent, &norm, &mut reply),
         }
         self.deadline = self.is_waiting().then(|| now + ANSWER_TIMEOUT);
         reply
@@ -491,9 +543,12 @@ impl Dialog {
             if command.is_empty() {
                 reply.say.push(self.engine.say(Line::EmptyShell, &[]));
             } else {
-                self.decide(Plan::shell(command, true), None, reply);
+                self.decide(vec![Plan::shell(command, true)], None, reply);
             }
             return;
+        }
+        if raw.contains('|') {
+            return self.pipe(raw, reply);
         }
         if let (Some(value), Some(last)) = (correction(norm), self.last.clone()) {
             return self.correct(last, value, reply);
@@ -556,7 +611,10 @@ impl Dialog {
                 reply
                     .say
                     .push(self.engine.say(Line::OfferShell, &[("text", raw)]));
-                self.state = State::Confirming { plan, intent: None };
+                self.state = State::Confirming {
+                    pipe: vec![plan],
+                    intent: None,
+                };
                 return;
             }
         }
@@ -596,11 +654,43 @@ impl Dialog {
             slots: intent.slots.clone(),
             typed: false,
         };
-        self.decide(plan, Some(intent), reply);
+        self.decide(vec![plan], Some(intent), reply);
     }
 
-    fn decide(&mut self, plan: Plan, intent: Option<Intent>, reply: &mut Reply) {
-        match self.engine.decision(&self.owner, &plan) {
+    /// `a | b | c`: every stage must resolve, and each must fit the output of the one
+    /// before (PLAN.md section 3.11). Then the pipe goes through policy as one.
+    fn pipe(&mut self, raw: &str, reply: &mut Reply) {
+        let engine = Arc::clone(&self.engine);
+        let mut pipe: Vec<Plan> = Vec::new();
+        for text in raw.split('|').map(str::trim) {
+            let Some(plan) = engine.stage(text) else {
+                reply
+                    .say
+                    .push(engine.say(Line::BadStage, &[("text", text)]));
+                return;
+            };
+            let shape = engine.commands.get(&plan.command).map(|info| info.pipe);
+            let problem = match (pipe.last(), shape) {
+                (_, None) => Some(Line::BadStage),
+                (None, Some(shape)) if shape.is_transform() => Some(Line::PipeStart),
+                (Some(_), Some(shape)) if !shape.is_transform() => Some(Line::NoInput),
+                (Some(before), Some(_)) => {
+                    let output = engine.commands.get(&before.command).map(|i| i.pipe.output);
+                    (output != Some(DataKind::Lines)).then_some(Line::NoOutput)
+                }
+                (None, Some(_)) => None,
+            };
+            if let Some(line) = problem {
+                reply.say.push(engine.say(line, &[("text", text)]));
+                return;
+            }
+            pipe.push(plan);
+        }
+        self.decide(pipe, None, reply);
+    }
+
+    fn decide(&mut self, pipe: Vec<Plan>, intent: Option<Intent>, reply: &mut Reply) {
+        match self.engine.pipe_decision(&self.owner, &pipe) {
             None => reply.say.push(self.engine.say(Line::Unavailable, &[])),
             Some(Decision::Deny) => {
                 let line = self
@@ -609,19 +699,21 @@ impl Dialog {
                 reply.say.push(line);
             }
             Some(Decision::Confirm) => {
-                reply.say.push(self.engine.confirm_question(&plan));
-                self.state = State::Confirming { plan, intent };
+                reply.say.push(self.engine.confirm_question(&pipe));
+                self.state = State::Confirming { pipe, intent };
             }
-            Some(Decision::Allow) => self.submit(plan, intent, reply),
+            Some(Decision::Allow) => self.submit(pipe, intent, reply),
         }
     }
 
-    fn submit(&mut self, plan: Plan, intent: Option<Intent>, reply: &mut Reply) {
+    fn submit(&mut self, pipe: Vec<Plan>, intent: Option<Intent>, reply: &mut Reply) {
         if intent.is_some() {
             self.last = intent;
         }
-        reply.say.extend(self.engine.started(&plan));
-        reply.run.push(plan);
+        if let Some(first) = pipe.first() {
+            reply.say.extend(self.engine.started(first));
+        }
+        reply.run.push(pipe);
     }
 
     fn answer(&mut self, mut intent: Intent, slot: String, raw: &str, reply: &mut Reply) {
@@ -706,14 +798,14 @@ impl Dialog {
         }
     }
 
-    fn confirm(&mut self, plan: Plan, intent: Option<Intent>, norm: &str, reply: &mut Reply) {
+    fn confirm(&mut self, pipe: Vec<Plan>, intent: Option<Intent>, norm: &str, reply: &mut Reply) {
         if YES.contains(&norm) {
             if self.owner.trust == Trust::Voice && !self.vouched {
                 reply.say.push(self.engine.say(Line::UnknownVoice, &[]));
-                self.state = State::Confirming { plan, intent };
+                self.state = State::Confirming { pipe, intent };
                 return;
             }
-            self.submit(plan, intent, reply);
+            self.submit(pipe, intent, reply);
             return self.next(reply);
         }
         if let (Some(value), Some(intent)) = (correction(norm), intent.clone()) {
@@ -725,7 +817,7 @@ impl Dialog {
             return;
         }
         reply.say.push(self.engine.say(Line::YesOrNo, &[]));
-        self.state = State::Confirming { plan, intent };
+        self.state = State::Confirming { pipe, intent };
     }
 
     /// Puts `value` into the slot it fits (a list that knows it, else the only slot) and
@@ -799,10 +891,31 @@ risky = true
         let info = |caps: &[Capability], owner_defined| CommandInfo {
             capabilities: caps.to_vec(),
             owner_defined,
+            pipe: PipeShape::SOURCE,
         };
+        let shaped = |caps: &[Capability], pipe| CommandInfo {
+            pipe,
+            ..info(caps, false)
+        };
+        let lines = DataKind::Lines;
         BTreeMap::from([
-            ("open_app".to_owned(), info(&[C::Apps], false)),
-            ("close_app".to_owned(), info(&[C::Apps], false)),
+            ("open_app".to_owned(), shaped(&[C::Apps], PipeShape::NONE)),
+            ("close_app".to_owned(), shaped(&[C::Apps], PipeShape::NONE)),
+            (
+                "head".to_owned(),
+                shaped(&[], PipeShape::transform(lines, Some("count"))),
+            ),
+            (
+                "count".to_owned(),
+                shaped(&[], PipeShape::transform(lines, None)),
+            ),
+            (
+                "save".to_owned(),
+                shaped(
+                    &[C::FsWrite],
+                    PipeShape::transform(DataKind::Empty, Some("path")),
+                ),
+            ),
             ("run_script".to_owned(), info(&[C::Shell], true)),
             ("search".to_owned(), info(&[C::Read], false)),
             ("send_sms".to_owned(), info(&[C::Send], false)),
@@ -830,8 +943,8 @@ risky = true
             for say in reply.say {
                 out.push_str(&format!("< {say}\n"));
             }
-            for plan in reply.run {
-                out.push_str(&format!("! {}\n", engine.readback(&plan)));
+            for pipe in reply.run {
+                out.push_str(&format!("! {}\n", engine.readback_pipe(&pipe)));
             }
         }
         out
@@ -850,6 +963,22 @@ risky = true
                     "$ ls -la",
                     "run build",
                     "open firefox and search rust tokio",
+                ]
+            )
+        );
+        insta::assert_snapshot!(
+            "pipes",
+            transcript(
+                Arc::clone(&full),
+                &[
+                    "run build | head 3 | count",
+                    "Run build | save Out File.txt",
+                    "yes",
+                    "head 3 | count",
+                    "open firefox | count",
+                    "run build | open firefox",
+                    "run build | fly away",
+                    "$ ls | grep src",
                 ]
             )
         );

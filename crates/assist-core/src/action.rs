@@ -37,6 +37,57 @@ pub enum Chunk {
 
 pub use assist_proto::Lane;
 
+/// What flows between pipe stages (PLAN.md section 3.11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataKind {
+    /// Nothing: the action reads no input, or writes no lines for a next stage.
+    Empty,
+    /// Text lines ([`Chunk::Line`]).
+    Lines,
+}
+
+/// How an action fits in a pipe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PipeShape {
+    /// What it reads from the previous stage. `Lines` makes it a transform: written after a
+    /// `|` as `<name> <arg>`, never matched from speech.
+    pub input: DataKind,
+    /// What it writes for the next stage.
+    pub output: DataKind,
+    /// For a transform, the slot that gets the rest of the stage text, e.g. `count` in
+    /// `head 3`.
+    pub arg: Option<&'static str>,
+}
+
+impl PipeShape {
+    /// Reads nothing, writes nothing a next stage can use (opening an app).
+    pub const NONE: Self = Self {
+        input: DataKind::Empty,
+        output: DataKind::Empty,
+        arg: None,
+    };
+    /// Starts a pipe: reads nothing, writes lines (a script's output).
+    pub const SOURCE: Self = Self {
+        input: DataKind::Empty,
+        output: DataKind::Lines,
+        arg: None,
+    };
+
+    /// A transform from lines to `output`, taking the rest of the stage as `arg`.
+    pub const fn transform(output: DataKind, arg: Option<&'static str>) -> Self {
+        Self {
+            input: DataKind::Lines,
+            output,
+            arg,
+        }
+    }
+
+    /// Whether this is a transform, which needs a stage before it.
+    pub fn is_transform(&self) -> bool {
+        self.input == DataKind::Lines
+    }
+}
+
 /// What an action is and needs. The core refuses capabilities that are not declared.
 #[derive(Debug, Clone)]
 pub struct Manifest {
@@ -48,6 +99,8 @@ pub struct Manifest {
     pub owner_defined: bool,
     /// Default lane.
     pub lane: Lane,
+    /// How it fits in a pipe.
+    pub pipe: PipeShape,
 }
 
 /// Everything a running job gets.

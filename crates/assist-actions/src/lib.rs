@@ -15,6 +15,8 @@ pub mod scripts;
 pub mod search;
 #[cfg(feature = "shell")]
 pub mod shell;
+#[cfg(feature = "transforms")]
+pub mod transforms;
 
 /// Every action compiled into this build.
 // Each push is feature-gated, so a `vec![]` literal does not work; with no features the
@@ -30,6 +32,8 @@ pub fn builtin() -> Vec<Arc<dyn Action>> {
     actions.push(Arc::new(apps::OpenApp));
     #[cfg(feature = "search")]
     actions.push(Arc::new(search::Search));
+    #[cfg(feature = "transforms")]
+    actions.extend(transforms::all());
     actions
 }
 
@@ -67,7 +71,20 @@ pub(crate) mod testing {
 
     /// Runs `action` to the end and collects its output.
     pub async fn run(action: &dyn Action, ctx: JobCtx) -> (Result<(), ActionError>, Vec<Chunk>) {
-        let (_input_tx, input) = mpsc::channel(1);
+        run_with_input(action, ctx, &[]).await
+    }
+
+    /// Runs `action` with `lines` as its pipe input and collects its output.
+    pub async fn run_with_input(
+        action: &dyn Action,
+        ctx: JobCtx,
+        lines: &[&str],
+    ) -> (Result<(), ActionError>, Vec<Chunk>) {
+        let (input_tx, input) = mpsc::channel(lines.len().max(1));
+        for line in lines {
+            let _ = input_tx.try_send(Chunk::Line((*line).to_owned()));
+        }
+        drop(input_tx);
         let (out, mut output) = mpsc::channel(256);
         let result = action.run(ctx, input, out).await;
         let mut chunks = Vec::new();

@@ -1,0 +1,22 @@
+---
+source: crates/assist-core/src/dialog.rs
+expression: "transcript(Arc::clone(&full),\n&[\"run build | head 3 | count\", \"Run build | save Out File.txt\", \"yes\",\n\"head 3 | count\", \"open firefox | count\", \"run build | open firefox\",\n\"run build | fly away\", \"$ ls | grep src\",])"
+---
+> run build | head 3 | count
+< Running build.
+! run_script: script = build | head: count = 3 | count
+> Run build | save Out File.txt
+< run_script: script = build | save: path = Out File.txt?
+> yes
+< Running build.
+! run_script: script = build | save: path = Out File.txt
+> head 3 | count
+< "head 3" needs input: put a command and | before it.
+> open firefox | count
+< The stage before "count" has no output to pipe.
+> run build | open firefox
+< "open firefox" can't take input from a pipe.
+> run build | fly away
+< I can't use "fly away" in a pipe.
+> $ ls | grep src
+! $ ls | grep src

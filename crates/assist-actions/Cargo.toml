@@ -9,15 +9,17 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-default = ["shell", "scripts", "apps", "search"]
+default = ["shell", "scripts", "apps", "search", "transforms"]
 shell = ["dep:process-wrap", "dep:tokio"]
 scripts = ["shell", "dep:toml"]
 apps = ["dep:open", "dep:tokio", "dep:toml"]
 search = ["dep:open", "dep:tokio"]
+transforms = ["dep:regex", "dep:tokio"]
 
 [dependencies]
 assist-core.workspace = true
 open = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["fs", "io-util", "macros", "process", "rt"] }
 toml = { workspace = true, optional = true }
 

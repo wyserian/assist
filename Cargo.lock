@@ -125,6 +125,7 @@ dependencies = [
  "assist-core",
  "open",
  "process-wrap",
+ "regex",
  "tokio",
  "tokio-util",
  "toml",

@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use assist_core::action::Chunk;
-use assist_core::dialog::{Dialog, Engine};
+use assist_core::dialog::{Dialog, Engine, Plan};
 use assist_core::policy::Principal;
 use assist_core::scheduler::{JobEvent, JobId, Scheduler};
 use assist_core::store::Store;
@@ -139,13 +139,24 @@ impl Repl {
         for say in reply.say {
             println!("{}", printable(&say));
         }
-        for plan in reply.run {
-            let title = self.engine.readback(&plan);
+        for pipe in reply.run {
+            let stages: Vec<(Plan, String)> = pipe
+                .into_iter()
+                .map(|plan| {
+                    let title = self.engine.readback(&plan);
+                    (plan, title)
+                })
+                .collect();
+            let titles: Vec<String> = stages.iter().map(|(_, title)| title.clone()).collect();
             match self
                 .scheduler
-                .submit(plan, self.owner.clone(), title.clone(), self.cwd.clone())
+                .submit_pipe(stages, self.owner.clone(), self.cwd.clone())
             {
-                Ok(id) => println!("[#{id}] {}", printable(&title)),
+                Ok(ids) => {
+                    for (id, title) in ids.iter().zip(&titles) {
+                        println!("[#{id}] {}", printable(title));
+                    }
+                }
                 Err(err) => println!("{err}"),
             }
         }

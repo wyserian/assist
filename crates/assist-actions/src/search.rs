@@ -1,7 +1,7 @@
 //! "search rust tokio": opens a web search in the default browser, using `[search] url`.
 
 use assist_core::action::{
-    Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest, Output,
+    Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest, Output, PipeShape,
 };
 use assist_core::policy::Capability;
 
@@ -13,6 +13,7 @@ static MANIFEST: Manifest = Manifest {
     capabilities: &[Capability::Read],
     owner_defined: false,
     lane: Lane::Interactive,
+    pipe: PipeShape::NONE,
 };
 
 impl Action for Search {
