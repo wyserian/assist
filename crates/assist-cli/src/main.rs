@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod autostart;
 mod client;
 mod commands;
 mod daemon;
@@ -85,6 +86,13 @@ enum Command {
     /// Manage secrets (API keys). Values are never shown.
     #[command(subcommand)]
     Secret(SecretCommand),
+    /// Start the daemon at login (Windows Startup folder, no window; Linux systemd user
+    /// service), with the same config and data directory.
+    InstallAutostart {
+        /// Remove the login entry instead.
+        #[arg(long)]
+        remove: bool,
+    },
     /// Interactive shell without a daemon: type commands, "$ cmd" for the system shell,
     /// "help" for more.
     Shell,
@@ -152,6 +160,7 @@ fn main() -> Result<ExitCode> {
                 commands::secret_delete(&paths, &name).await?;
             }
             Command::Shell => repl::run(paths).await?,
+            Command::InstallAutostart { remove } => autostart::run(&paths, remove)?,
             #[cfg(feature = "voice")]
             Command::Listen { device } => listen::run(&paths, device).await?,
             #[cfg(feature = "voice")]
