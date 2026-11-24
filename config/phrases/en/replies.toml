@@ -23,6 +23,7 @@ unknown_voice = "Sorry {address}, I don't recognise your voice. Confirm on scree
 unclear_correction = "I couldn't tell what \"{text}\" should replace."
 did_you_mean = "Did you mean {options}?"
 bad_stage = "I can't use \"{text}\" in a pipe."
+skipped = "Not running {text}: {condition} is not true."
 pipe_start = "\"{text}\" needs input: put a command and | before it."
 no_input = "\"{text}\" can't take input from a pipe."
 no_output = "The stage before \"{text}\" has no output to pipe."

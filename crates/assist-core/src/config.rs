@@ -11,6 +11,7 @@ use std::time::Duration;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 
+use crate::condition::Condition;
 use crate::dialog::SHELL;
 use crate::phrases::PhraseSet;
 use crate::policy::PolicyOverrides;
@@ -233,6 +234,9 @@ pub struct SavedPipe {
     /// A pipe, or another saved pipe's name, to run when the last try failed.
     #[serde(default)]
     pub on_error: Option<String>,
+    /// Runs only when this condition over facts holds, e.g. `node.charging`.
+    #[serde(default, rename = "if")]
+    pub condition: Option<String>,
 }
 
 /// Settings for one command (`[commands.<name>]`).
@@ -322,6 +326,11 @@ impl Config {
             return Err(ConfigError::Invalid(format!(
                 "[pipes] {name}: retry must be at most {MAX_RETRY}"
             )));
+        }
+        for (name, pipe) in &config.pipes {
+            if let Some(Err(err)) = pipe.condition.as_deref().map(Condition::parse) {
+                return Err(ConfigError::Invalid(format!("[pipes] {name}: {err}")));
+            }
         }
         if let Some(key) = config.replies.keys().find(|k| Line::from_key(k).is_none()) {
             return Err(ConfigError::Invalid(format!(
@@ -490,6 +499,17 @@ wake_word = \" bumblebee \"
         )
         .unwrap();
         assert_eq!(config.persona.wake_phrases(), ["bumblebee"]);
+    }
+
+    #[test]
+    fn a_bad_pipe_condition_is_a_config_error() {
+        let err = Config::from_toml(
+            "[pipes]
+x = { run = \"run build\", if = \"node.battery <\" }
+",
+        )
+        .unwrap_err();
+        assert!(err.to_string().starts_with("[pipes] x: condition"), "{err}");
     }
 
     #[test]

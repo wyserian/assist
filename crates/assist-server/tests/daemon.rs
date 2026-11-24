@@ -14,6 +14,7 @@ use assist_core::action::{
 use assist_core::audit::Audit;
 use assist_core::config::Config;
 use assist_core::dialog::{Engine, LiveEngine, SHELL};
+use assist_core::facts::Facts;
 use assist_core::phrases::PhraseSet;
 use assist_core::policy::Capability;
 use assist_core::scheduler::{Persistence, Scheduler};
@@ -121,6 +122,7 @@ async fn start(name: &str) -> Daemon {
             &PhraseSet::default_en().unwrap(),
             scheduler.commands(),
             true,
+            Facts::default(),
         )
         .unwrap(),
     )));
@@ -129,6 +131,7 @@ async fn start(name: &str) -> Daemon {
     let port = listener.local_addr().unwrap().port();
     let (stop, stopped) = oneshot::channel::<()>();
     let services = Services {
+        facts: Facts::default(),
         scheduler,
         engine,
         store,

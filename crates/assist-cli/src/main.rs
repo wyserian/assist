@@ -47,6 +47,8 @@ enum Command {
     },
     /// List active and recent jobs.
     Jobs,
+    /// Show device facts (battery, ...) for writing `if` conditions in [pipes].
+    Facts,
     /// Stop a job by id, or every job with "all".
     Stop {
         /// Job id or "all".
@@ -124,6 +126,7 @@ fn main() -> Result<ExitCode> {
             Command::Serve => daemon::run(paths).await?,
             Command::Run { text } => return commands::run(&paths, &text.join(" ")).await,
             Command::Jobs => commands::jobs(&paths).await?,
+            Command::Facts => commands::facts(&paths).await?,
             Command::Stop { target } => commands::stop(&paths, &target).await?,
             Command::Log { id } => commands::log(&paths, id).await?,
             Command::Explain { text } => commands::explain(&paths, &text.join(" ")).await?,

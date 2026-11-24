@@ -1,5 +1,6 @@
 //! [`assist_proto::rpc`] methods. Blocking work (store, keystore) runs on `spawn_blocking`.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -269,6 +270,14 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
             RpcResult::ok(SettingResult { restart_needed })
         }
         rpc::DIALOGS_PENDING => RpcResult::ok(conn.state.waiting()),
+        rpc::FACTS_LIST => {
+            let facts = conn.state.services.facts.all();
+            let shown: BTreeMap<String, String> = facts
+                .into_iter()
+                .map(|(name, value)| (name, value.to_string()))
+                .collect();
+            RpcResult::ok(shown)
+        }
         rpc::DIALOGS_ANSWER => {
             // A local user on the dashboard may answer any client's question (PLAN.md 3.5).
             require_local(conn)?;

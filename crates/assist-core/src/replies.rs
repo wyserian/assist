@@ -51,6 +51,8 @@ pub enum Line {
     DidYouMean,
     /// A pipe stage that is no command; `{text}`.
     BadStage,
+    /// A saved pipe's `if` does not hold; `{text}` is the pipe, `{condition}` its `if`.
+    Skipped,
     /// A pipe that starts with a transform; `{text}`.
     PipeStart,
     /// A command after `|` that takes no input; `{text}`.
@@ -63,7 +65,7 @@ pub enum Line {
 
 impl Line {
     /// Every line, for validation.
-    pub const ALL: [Line; 24] = [
+    pub const ALL: [Line; 25] = [
         Line::Greeting,
         Line::Wake,
         Line::NotUnderstood,
@@ -84,6 +86,7 @@ impl Line {
         Line::UnclearCorrection,
         Line::DidYouMean,
         Line::BadStage,
+        Line::Skipped,
         Line::PipeStart,
         Line::NoInput,
         Line::NoOutput,
@@ -113,6 +116,7 @@ impl Line {
             Line::UnclearCorrection => "unclear_correction",
             Line::DidYouMean => "did_you_mean",
             Line::BadStage => "bad_stage",
+            Line::Skipped => "skipped",
             Line::PipeStart => "pipe_start",
             Line::NoInput => "no_input",
             Line::NoOutput => "no_output",

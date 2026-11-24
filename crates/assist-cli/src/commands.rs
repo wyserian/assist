@@ -1,6 +1,6 @@
 //! One-shot commands that talk to the running daemon.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::process::ExitCode;
 
@@ -74,6 +74,19 @@ pub async fn jobs(paths: &Paths) -> Result<()> {
     }
     for job in &jobs {
         println!("{}", job_row(job));
+    }
+    Ok(())
+}
+
+/// Prints the current facts, for writing `if` conditions.
+pub async fn facts(paths: &Paths) -> Result<()> {
+    let mut client = Client::connect(paths.data(), false).await?;
+    let facts: BTreeMap<String, String> = client.call(rpc::FACTS_LIST, ()).await?;
+    if facts.is_empty() {
+        println!("No facts yet (they are read every 30 seconds).");
+    }
+    for (name, value) in &facts {
+        println!("{} = {}", printable(name), printable(value));
     }
     Ok(())
 }

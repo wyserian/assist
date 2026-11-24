@@ -143,6 +143,10 @@ pub struct SettingResult {
 
 /// Questions clients are waiting on. Result: `Vec<Waiting>`.
 pub const DIALOGS_PENDING: &str = "dialogs.pending";
+
+/// Current facts (device state) for writing conditions. Result: `BTreeMap<String, String>`,
+/// name to value as a condition writes it (`80`, `true`, `"Code.exe"`).
+pub const FACTS_LIST: &str = "facts.list";
 /// Answers another client's question as that client. Params: [`DialogAnswer`]. Result:
 /// [`crate::Reply`]; the asking client gets the same reply and follows its jobs.
 pub const DIALOGS_ANSWER: &str = "dialogs.answer";

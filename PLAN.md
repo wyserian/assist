@@ -264,6 +264,17 @@ grammars and pipe conditions: `node.battery`, `node.charging`, `net.ssid`, `scre
 `app.focused`, `location.zone` (phone), `user.away`. Facts are not synced by default; a node can
 publish selected facts to the hub. (Built in Phase 3 together with its first consumers.)
 
+- Store: `Facts` in core, values number / bool / text, bounded (256 facts, 256-byte text),
+  not stored on disk. Sources live in `assist-actions` (feature `facts`); the daemon samples
+  them every 30 s off the async runtime. `assist facts` (rpc `facts.list`) shows them.
+- Desktop sources so far: `node.battery`, `node.charging` (plugged in) from WinRT
+  `PowerManager` on Windows and `/sys/class/power_supply` on Linux. `app.focused` and idle
+  time need `unsafe` Win32 calls (the workspace forbids `unsafe`) or X11 on Linux.
+- Conditions (`if` on saved pipes now; fact triggers and proactive rules later): `and`, `or`,
+  `not`, `== != < <= > >=`, parentheses, numbers, `'text'` (compared ignoring case),
+  `true`/`false`. A fact that is not set makes its comparison false. The dialog checks a
+  saved pipe's `if` when it is run, so every trigger gets the same check.
+
 ### 3.11 Pipes
 
 `ocr screen | filter error | telegram me`
@@ -992,6 +1003,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Wyoming adapter deferred: Phase 2's done-when ("open firefox" by voice within budget) is met, the owner runs no Wyoming server, and a Piper voice through it would also need PCM playback. Built when a Wyoming server is wanted or with the Phase 9 room microphones. Phase 2 closes with release 0.3.0 |
 | 2026-11-25 | Pipes (Phase 3 step 1): `PipeShape { input, output, arg }` on every action manifest; transforms are actions in `assist-actions` (feature `transforms`) with a raw `<name> <arg>` syntax, because phrase matching normalizes text (paths, regexes). The scheduler runs a pipe as one task holding one lane slot (per-stage slots could deadlock a pipe longer than the lane), stages joined by bounded channels; a single job is a one-stage pipe. `JobSummary.group` marks stages (not persisted yet). `map`, `json` and `post` wait for an expression syntax and an HTTP action |
 | 2026-11-25 | Saved pipes and pipe control (Phase 3 step 2): `[pipes]`, `run_pipe` phrase-only command expanded by the dialog, `retry` (max 10) and `on_error` in the scheduler (`Submission`), policy over every stage that may run. Taint rule: `PipeShape.untrusted`; a `send` stage after an untrusted one always asks. No action declares untrusted output yet (OCR and web actions will). `if <fact>` comes with facts in step 3 |
+| 2026-11-25 | Facts (Phase 3 step 3): core `Facts` store and `Condition` language; `if` on saved pipes checked by the dialog (a skipped pipe makes no jobs). Battery facts through safe APIs only (WinRT `PowerManager`, Linux sysfs); focused app and idle time wait for a decision on an audited `unsafe` exception, since `unsafe_code` is forbidden workspace-wide |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

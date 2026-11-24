@@ -3,11 +3,13 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use assist_core::audit::Audit;
 use assist_core::config::Config;
 use assist_core::dialog::{Engine, LiveEngine};
+use assist_core::facts::Facts;
 use assist_core::phrases::PhraseSet;
 use assist_core::scheduler::{Persistence, Scheduler};
 use assist_core::secrets::Secrets;
@@ -62,6 +64,32 @@ impl Paths {
     }
 }
 
+/// How often device facts are read.
+const FACT_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Keeps `facts` current from this device's sources; a fact a source stops reporting is
+/// removed. Runs until the runtime stops.
+async fn sample_facts(facts: Facts) {
+    let mut reported: Vec<&'static str> = Vec::new();
+    let mut tick = tokio::time::interval(FACT_INTERVAL);
+    loop {
+        tick.tick().await;
+        let Ok(sampled) = tokio::task::spawn_blocking(assist_actions::facts::sample).await else {
+            continue;
+        };
+        for name in reported
+            .iter()
+            .filter(|n| !sampled.iter().any(|(s, _)| s == *n))
+        {
+            facts.remove(name);
+        }
+        reported = sampled.iter().map(|(name, _)| *name).collect();
+        for (name, value) in sampled {
+            facts.set(name, value);
+        }
+    }
+}
+
 /// The config file, or an empty config when there is none.
 pub fn load_config(paths: &Paths) -> Result<Config> {
     if paths.config.exists() {
@@ -79,6 +107,8 @@ pub fn load_config(paths: &Paths) -> Result<Config> {
 pub struct Assistant {
     /// The loaded config.
     pub config: Arc<Config>,
+    /// Current device state, sampled by the daemon.
+    pub facts: Facts,
     /// Secrets, if a keystore is available.
     pub secrets: Option<Arc<Secrets>>,
     /// Audit log.
@@ -124,14 +154,18 @@ impl Assistant {
         );
         let mut phrases = PhraseSet::default_en()?;
         phrases.extend(PhraseSet::load_dir(&paths.phrases_dir())?);
+        let facts = Facts::default();
+        tokio::spawn(sample_facts(facts.clone()));
         let engine = Arc::new(LiveEngine::new(Arc::new(Engine::new(
             Arc::clone(&config),
             &phrases,
             scheduler.commands(),
             true,
+            facts.clone(),
         )?)));
         Ok(Self {
             config,
+            facts,
             secrets,
             audit,
             store,

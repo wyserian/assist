@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 use assist_proto::rpc::Explanation;
 
 use crate::action::{DataKind, PipeShape};
+use crate::condition::Condition;
 use crate::config::{Config, ConfigError};
+use crate::facts::Facts;
 use crate::matcher::{BuildError, Intent, Matcher, RuleMatcher, SlotType};
 use crate::normalize::{normalize, parse_number};
 use crate::phrases::{CommandSpec, PhraseSet};
@@ -88,6 +90,8 @@ pub struct Engine {
     asks: BTreeMap<String, BTreeMap<String, String>>,
     replies: Replies,
     offer_shell: bool,
+    /// Current device state, for saved pipes' `if`.
+    facts: Facts,
 }
 
 impl Engine {
@@ -98,6 +102,7 @@ impl Engine {
         phrases: &PhraseSet,
         commands: BTreeMap<String, CommandInfo>,
         offer_shell: bool,
+        facts: Facts,
     ) -> Result<Self, EngineError> {
         config.validate_commands(phrases)?;
         let matcher = RuleMatcher::new(phrases, &config)?;
@@ -120,6 +125,7 @@ impl Engine {
             commands,
             asks,
             offer_shell,
+            facts,
         };
         // A saved pipe that cannot work is a config error now, not when its trigger fires.
         // A stage this device lacks is not: the same config serves devices with other
@@ -143,6 +149,7 @@ impl Engine {
             phrases,
             self.commands.clone(),
             self.offer_shell,
+            self.facts.clone(),
         )
     }
 
@@ -154,6 +161,7 @@ impl Engine {
             &self.phrases,
             self.commands.clone(),
             self.offer_shell,
+            self.facts.clone(),
         )
     }
 
@@ -296,6 +304,14 @@ impl Engine {
             pipe.push(plan);
         }
         Ok(pipe)
+    }
+
+    /// A saved pipe's `if` when the current facts do not meet it.
+    fn unmet_condition(&self, name: &str) -> Option<String> {
+        let text = self.config.pipes.get(name)?.condition.as_deref()?;
+        // Config loading has parsed every condition, so a failure here cannot happen.
+        let met = Condition::parse(text).is_ok_and(|c| c.eval(&|fact| self.facts.get(fact)));
+        (!met).then(|| text.to_owned())
     }
 
     /// A saved pipe from `[pipes]`; its `on_error` is a pipe or another saved pipe's name.
@@ -791,6 +807,10 @@ impl Dialog {
         }
         if saved {
             let name = intent.slots.get("pipe").cloned().unwrap_or_default();
+            if let Some(condition) = self.engine.unmet_condition(&name) {
+                let vars = [("text", name.as_str()), ("condition", condition.as_str())];
+                return reply.say.push(self.engine.say(Line::Skipped, &vars));
+            }
             return match self.engine.saved_pipe(&name) {
                 Ok(pipe) => self.decide(pipe, None, reply),
                 Err((line, text)) => reply.say.push(self.engine.say(line, &[("text", &text)])),
@@ -1062,7 +1082,7 @@ alert = { run = "run build | save errors.txt" }
     fn engine(offer_shell: bool, commands: BTreeMap<String, CommandInfo>) -> Arc<Engine> {
         let config = Arc::new(Config::from_toml(CONFIG).unwrap());
         let phrases = PhraseSet::default_en().unwrap();
-        Arc::new(Engine::new(config, &phrases, commands, offer_shell).unwrap())
+        Arc::new(Engine::new(config, &phrases, commands, offer_shell, Facts::default()).unwrap())
     }
 
     /// Runs `lines` through one dialog: `>` input, `<` reply, `!` scheduled plan.
@@ -1183,6 +1203,7 @@ alert = { run = "run build | save errors.txt" }
             &PhraseSet::default_en().unwrap(),
             BTreeMap::new(),
             true,
+            Facts::default(),
         )
         .unwrap();
         assert_eq!(
@@ -1228,7 +1249,7 @@ alert = { run = "run build | save errors.txt" }
         );
         let config = Arc::new(Config::from_toml(&config).unwrap());
         let phrases = PhraseSet::default_en().unwrap();
-        let err = Engine::new(config, &phrases, commands(), true).unwrap_err();
+        let err = Engine::new(config, &phrases, commands(), true, Facts::default()).unwrap_err();
         assert_eq!(
             err.to_string(),
             "[pipes] bad: \"head 3\" needs input: put a command and | before it."
@@ -1257,7 +1278,14 @@ send = {{ local = \"allow\" }}
         );
         let config = Arc::new(Config::from_toml(&config).unwrap());
         let engine = Arc::new(
-            Engine::new(config, &PhraseSet::default_en().unwrap(), commands, true).unwrap(),
+            Engine::new(
+                config,
+                &PhraseSet::default_en().unwrap(),
+                commands,
+                true,
+                Facts::default(),
+            )
+            .unwrap(),
         );
         let owner = Principal::local("cli");
         let mut dialog = Dialog::new(engine, owner.clone());
@@ -1266,6 +1294,37 @@ send = {{ local = \"allow\" }}
         let tainted = dialog.handle(&owner, "run build | fetch | mail", Instant::now());
         assert!(tainted.run.is_empty());
         assert!(dialog.is_waiting());
+    }
+
+    #[test]
+    fn a_saved_pipe_runs_only_when_its_if_holds() {
+        let config = format!(
+            "{CONFIG}plugged = {{ run = \"run build | count\", if = \"node.charging\" }}
+"
+        );
+        let config = Arc::new(Config::from_toml(&config).unwrap());
+        let facts = Facts::default();
+        let engine = Arc::new(
+            Engine::new(
+                config,
+                &PhraseSet::default_en().unwrap(),
+                commands(),
+                true,
+                facts.clone(),
+            )
+            .unwrap(),
+        );
+        let owner = Principal::local("cli");
+        let mut dialog = Dialog::new(engine, owner.clone());
+        let skipped = dialog.handle(&owner, "run plugged", Instant::now());
+        assert_eq!(
+            skipped.say,
+            ["Not running plugged: node.charging is not true."]
+        );
+        assert!(skipped.run.is_empty());
+        facts.set("node.charging", crate::facts::Value::Bool(true));
+        let ran = dialog.handle(&owner, "run plugged", Instant::now());
+        assert_eq!(ran.run.len(), 1);
     }
 
     #[test]

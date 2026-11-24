@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use assist_core::audit::Audit;
 use assist_core::dialog::LiveEngine;
+use assist_core::facts::Facts;
 use assist_core::scheduler::Scheduler;
 use assist_core::secrets::Secrets;
 use assist_core::store::Store;
@@ -53,6 +54,8 @@ pub struct Services {
     pub scheduler: Scheduler,
     /// Matcher, policy and available commands; replaced when phrases change.
     pub engine: Arc<LiveEngine>,
+    /// Current device state.
+    pub facts: Facts,
     /// The user phrase file that `phrases.add` writes to.
     pub user_phrases: Option<PathBuf>,
     /// The config file that `settings.set` edits.

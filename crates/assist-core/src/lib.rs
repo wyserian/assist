@@ -5,8 +5,10 @@
 
 pub mod action;
 pub mod audit;
+pub mod condition;
 pub mod config;
 pub mod dialog;
+pub mod facts;
 pub mod matcher;
 pub mod normalize;
 pub mod phrase;

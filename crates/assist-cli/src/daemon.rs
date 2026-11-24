@@ -35,6 +35,7 @@ pub async fn run(paths: Paths) -> Result<()> {
     let services = Services {
         scheduler: assistant.scheduler.clone(),
         engine: assistant.engine.clone(),
+        facts: assistant.facts.clone(),
         store: assistant.store.clone(),
         audit: Some(assistant.audit.clone()),
         secrets: assistant.secrets.clone(),

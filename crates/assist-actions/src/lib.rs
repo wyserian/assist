@@ -7,6 +7,8 @@ use assist_core::action::Action;
 
 #[cfg(feature = "apps")]
 pub mod apps;
+#[cfg(feature = "facts")]
+pub mod facts;
 #[cfg(feature = "shell")]
 mod process;
 #[cfg(feature = "scripts")]

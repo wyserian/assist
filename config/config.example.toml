@@ -15,7 +15,8 @@ backup = { windows = "C:/scripts/backup.ps1", linux = "~/scripts/backup.sh" }
 build  = { run = "cargo build", lane = "background" }
 
 # Saved pipes, run by name ("run errors"). retry runs a failed pipe again; on_error is a
-# pipe, or another saved pipe's name, to run when the last try failed.
+# pipe, or another saved pipe's name, to run when the last try failed; if runs it only when
+# a condition over facts holds (assist facts lists them), e.g. if = "node.charging".
 [pipes]
 errors = { run = "run build | filter error | save build-errors.txt", retry = 1 }
 
