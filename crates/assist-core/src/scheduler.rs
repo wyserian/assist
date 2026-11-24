@@ -34,6 +34,8 @@ pub const KEEP_FINISHED: usize = 100;
 const OUTPUT_BUFFER: usize = 256;
 /// Lines waiting between two pipe stages; a full buffer makes the earlier stage wait.
 const PIPE_BUFFER: usize = 256;
+/// Pause before a failed pipe runs again.
+const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 const EVENT_BUFFER: usize = 1024;
 
 pub use assist_proto::JobState;
@@ -125,6 +127,43 @@ pub enum SubmitError {
     EmptyPipe,
 }
 
+/// A confirmed pipe to run: stages with their titles, and for a saved pipe how to handle
+/// failure. Retries and the `on_error` pipe run as new jobs.
+///
+/// shortcut: a client follows only the job ids `submit_pipe` returned, so it does not stream
+/// retries and `on_error` jobs (`jobs` and the dashboard list them); upgrade when clients
+/// follow job groups.
+#[derive(Debug, Clone)]
+pub struct Submission {
+    /// Stages in order, each with its title.
+    pub stages: Vec<(Plan, String)>,
+    /// Runs again up to this many times when a stage fails.
+    pub retry: u32,
+    /// Runs when the last try failed; empty for nothing.
+    pub on_error: Vec<(Plan, String)>,
+}
+
+impl From<Vec<(Plan, String)>> for Submission {
+    fn from(stages: Vec<(Plan, String)>) -> Self {
+        Self {
+            stages,
+            retry: 0,
+            on_error: Vec::new(),
+        }
+    }
+}
+
+/// A stage resolved to its action, ready to become a job on every try.
+type Stage = (Arc<dyn Action>, Plan, String);
+
+/// Who runs a pipe and where; the same for every try.
+#[derive(Clone)]
+struct Origin {
+    principal: Principal,
+    cwd: PathBuf,
+    lane: Lane,
+}
+
 /// Runs jobs. Cheap to clone; clones share all state.
 #[derive(Clone)]
 pub struct Scheduler {
@@ -214,86 +253,40 @@ impl Scheduler {
         title: String,
         cwd: PathBuf,
     ) -> Result<JobId, SubmitError> {
-        let ids = self.submit_pipe(vec![(plan, title)], principal, cwd)?;
+        let ids = self.submit_pipe(vec![(plan, title)].into(), principal, cwd)?;
         ids.first().copied().ok_or(SubmitError::EmptyPipe)
     }
 
-    /// Queues a confirmed pipe, one `(plan, title)` per stage, and returns the stages' job
-    /// ids. The dialog has checked that each stage's input fits the previous output.
+    /// Queues a confirmed pipe and returns the job ids of its stages (first try). The
+    /// dialog has checked that each stage's input fits the previous output.
     pub fn submit_pipe(
         &self,
-        stages: Vec<(Plan, String)>,
+        run: Submission,
         principal: Principal,
         cwd: PathBuf,
     ) -> Result<Vec<JobId>, SubmitError> {
         let inner = &self.inner;
-        let actions = stages
-            .iter()
-            .map(|(plan, _)| {
-                inner
-                    .actions
-                    .get(&plan.command)
-                    .cloned()
-                    .ok_or_else(|| SubmitError::UnknownCommand(plan.command.clone()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let (Some(first_plan), Some(first_action)) =
-            (stages.first().map(|(plan, _)| plan), actions.first())
-        else {
+        let stages = inner.resolve(run.stages)?;
+        let on_error = inner.resolve(run.on_error)?;
+        let Some((first_action, first_plan, _)) = stages.first() else {
             return Err(SubmitError::EmptyPipe);
         };
         // The pipe runs in the lane of its first stage, the one that does the real work.
-        let lane = first_action.lane(first_plan, &inner.config);
-        let group_cancel = CancellationToken::new();
-        let piped = stages.len() > 1;
-        let mut group = None;
-        let mut run = Vec::with_capacity(stages.len());
-        for ((plan, title), action) in stages.into_iter().zip(actions) {
-            let id = inner.next_id.fetch_add(1, Ordering::Relaxed);
-            let group_id = *group.get_or_insert(id);
-            let info = JobInfo {
-                id,
-                command: plan.command.clone(),
-                title: inner.redact(&title).into_owned(),
-                principal: principal.clone(),
-                lane,
-                state: JobState::Queued,
-                created: now_ms(),
-                started: None,
-                finished: None,
-                error: None,
-                group: piped.then_some(group_id),
-            };
-            if let Some(store) = &inner.store {
-                store.insert(&info);
-            }
-            inner.jobs().insert(
-                id,
-                Slot {
-                    info,
-                    // Stopping any stage stops the whole pipe.
-                    cancel: group_cancel.clone(),
-                    tail: VecDeque::new(),
-                    tail_bytes: 0,
-                },
-            );
-            inner.audit(id, "submitted");
-            inner.emit(JobEvent::State {
-                id,
-                state: JobState::Queued,
-            });
-            let ctx = JobCtx {
-                job: id,
-                plan,
-                principal: principal.clone(),
-                config: Arc::clone(&inner.config),
-                cwd: cwd.clone(),
-                cancel: group_cancel.child_token(),
-            };
-            run.push((action, ctx));
-        }
-        let ids = run.iter().map(|(_, ctx)| ctx.job).collect();
-        tokio::spawn(run_pipe(Arc::clone(inner), run, lane, group_cancel));
+        let origin = Origin {
+            principal,
+            cwd,
+            lane: first_action.lane(first_plan, &inner.config),
+        };
+        let group = CancellationToken::new();
+        let first = inner.register(&stages, &origin, &group, None);
+        let ids = first.iter().map(|(_, ctx)| ctx.job).collect();
+        let retry = Retry {
+            stages,
+            tries: run.retry,
+            on_error,
+            origin,
+        };
+        tokio::spawn(run_pipe(Arc::clone(inner), first, group, retry));
         Ok(ids)
     }
 
@@ -358,15 +351,23 @@ impl Scheduler {
     }
 }
 
-/// Runs a pipe's stages together once its lane has room; one slot for the whole group, so
-/// a long pipe never waits on itself.
+/// What to do when a pipe fails.
+struct Retry {
+    stages: Vec<Stage>,
+    tries: u32,
+    on_error: Vec<Stage>,
+    origin: Origin,
+}
+
+/// Runs a pipe once its lane has room, holding one slot for the whole group (so a long
+/// pipe never waits on itself), its retries and its `on_error` pipe.
 async fn run_pipe(
     inner: Arc<Inner>,
-    stages: Vec<(Arc<dyn Action>, JobCtx)>,
-    lane: Lane,
+    first: Vec<(Arc<dyn Action>, JobCtx)>,
     group: CancellationToken,
+    retry: Retry,
 ) {
-    let semaphore = inner.lanes.get(&lane).cloned();
+    let semaphore = inner.lanes.get(&retry.origin.lane).cloned();
     let permit = match semaphore {
         Some(semaphore) => tokio::select! {
             biased;
@@ -376,11 +377,34 @@ async fn run_pipe(
         None => None,
     };
     let Some(_permit) = permit else {
-        for (_, ctx) in &stages {
+        for (_, ctx) in &first {
             inner.finish(ctx.job, JobState::Cancelled, None);
         }
         return;
     };
+    let mut failed = run_stages(&inner, first, group).await;
+    for attempt in 1..=retry.tries {
+        if !failed {
+            return;
+        }
+        tokio::time::sleep(RETRY_DELAY).await;
+        let group = CancellationToken::new();
+        let stages = inner.register(&retry.stages, &retry.origin, &group, Some(attempt));
+        failed = run_stages(&inner, stages, group).await;
+    }
+    if failed && !retry.on_error.is_empty() {
+        let group = CancellationToken::new();
+        let stages = inner.register(&retry.on_error, &retry.origin, &group, None);
+        run_stages(&inner, stages, group).await;
+    }
+}
+
+/// Runs stages joined by channels; true if one failed or timed out (not when stopped).
+async fn run_stages(
+    inner: &Arc<Inner>,
+    stages: Vec<(Arc<dyn Action>, JobCtx)>,
+    group: CancellationToken,
+) -> bool {
     let mut tasks = JoinSet::new();
     let (closed, mut input) = mpsc::channel(1);
     drop(closed);
@@ -392,7 +416,7 @@ async fn run_pipe(
         } else {
             (None, None)
         };
-        let stage = run_stage(Arc::clone(&inner), action, ctx, input, next, group.clone());
+        let stage = run_stage(Arc::clone(inner), action, ctx, input, next, group.clone());
         tasks.spawn(stage);
         if let Some(rx) = next_input {
             input = rx;
@@ -400,7 +424,11 @@ async fn run_pipe(
             break;
         }
     }
-    while tasks.join_next().await.is_some() {}
+    let mut failed = false;
+    while let Some(state) = tasks.join_next().await {
+        failed |= matches!(state, Ok(JobState::Failed | JobState::TimedOut));
+    }
+    failed
 }
 
 /// Runs one stage. Its lines go to `next` when there is a next stage, else to the job's
@@ -412,7 +440,7 @@ async fn run_stage(
     input: Input,
     next: Option<Output>,
     group: CancellationToken,
-) {
+) -> JobState {
     let id = ctx.job;
     let cancel = ctx.cancel.clone();
     inner.update(id, |info| {
@@ -464,6 +492,7 @@ async fn run_stage(
     drop(next);
     cancel.cancel();
     inner.finish(id, state, error);
+    state
 }
 
 /// Hands a chunk on: lines to the next stage when there is one, everything else to the
@@ -479,6 +508,79 @@ async fn pass(inner: &Inner, id: JobId, next: Option<&Output>, chunk: Chunk) -> 
 }
 
 impl Inner {
+    /// Each stage's action; fails on a command no action runs.
+    fn resolve(&self, stages: Vec<(Plan, String)>) -> Result<Vec<Stage>, SubmitError> {
+        stages
+            .into_iter()
+            .map(|(plan, title)| match self.actions.get(&plan.command) {
+                Some(action) => Ok((Arc::clone(action), plan, title)),
+                None => Err(SubmitError::UnknownCommand(plan.command)),
+            })
+            .collect()
+    }
+
+    /// New queued jobs for one try of `stages`, sharing `group` (stopping any stage stops
+    /// them all). `attempt` marks a retry in the titles.
+    fn register(
+        &self,
+        stages: &[Stage],
+        origin: &Origin,
+        group: &CancellationToken,
+        attempt: Option<u32>,
+    ) -> Vec<(Arc<dyn Action>, JobCtx)> {
+        let piped = stages.len() > 1;
+        let mut group_id = None;
+        let mut out = Vec::with_capacity(stages.len());
+        for (action, plan, title) in stages {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let first = *group_id.get_or_insert(id);
+            let title = match attempt {
+                Some(n) => format!("{title} (retry {n})"),
+                None => title.clone(),
+            };
+            let info = JobInfo {
+                id,
+                command: plan.command.clone(),
+                title: self.redact(&title).into_owned(),
+                principal: origin.principal.clone(),
+                lane: origin.lane,
+                state: JobState::Queued,
+                created: now_ms(),
+                started: None,
+                finished: None,
+                error: None,
+                group: piped.then_some(first),
+            };
+            if let Some(store) = &self.store {
+                store.insert(&info);
+            }
+            self.jobs().insert(
+                id,
+                Slot {
+                    info,
+                    cancel: group.clone(),
+                    tail: VecDeque::new(),
+                    tail_bytes: 0,
+                },
+            );
+            self.audit(id, "submitted");
+            self.emit(JobEvent::State {
+                id,
+                state: JobState::Queued,
+            });
+            let ctx = JobCtx {
+                job: id,
+                plan: plan.clone(),
+                principal: origin.principal.clone(),
+                config: Arc::clone(&self.config),
+                cwd: origin.cwd.clone(),
+                cancel: group.child_token(),
+            };
+            out.push((Arc::clone(action), ctx));
+        }
+        out
+    }
+
     fn jobs(&self) -> MutexGuard<'_, BTreeMap<JobId, Slot>> {
         self.jobs.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -720,7 +822,7 @@ mod tests {
     }
 
     fn pipe(scheduler: &Scheduler, commands: &[&str]) -> Vec<JobId> {
-        let stages = commands
+        let stages: Vec<(Plan, String)> = commands
             .iter()
             .map(|command| {
                 let plan = Plan {
@@ -732,8 +834,59 @@ mod tests {
             })
             .collect();
         scheduler
-            .submit_pipe(stages, Principal::local("test"), PathBuf::from("."))
+            .submit_pipe(
+                Submission::from(stages),
+                Principal::local("test"),
+                PathBuf::from("."),
+            )
             .unwrap()
+    }
+
+    fn stage(command: &str) -> (Plan, String) {
+        let plan = Plan {
+            command: command.to_owned(),
+            slots: BTreeMap::new(),
+            typed: false,
+        };
+        (plan, command.to_owned())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_pipe_retries_then_runs_on_error() {
+        let s = scheduler("");
+        let mut events = s.subscribe();
+        let run = Submission {
+            stages: vec![stage("fail")],
+            retry: 1,
+            on_error: vec![stage("echo")],
+        };
+        let ids = s
+            .submit_pipe(run, Principal::local("test"), PathBuf::from("."))
+            .unwrap();
+        let (retry, on_error) = (ids[0] + 1, ids[0] + 2);
+        assert_eq!(finished(&mut events, ids[0]).await, JobState::Failed);
+        assert_eq!(finished(&mut events, retry).await, JobState::Failed);
+        assert_eq!(finished(&mut events, on_error).await, JobState::Done);
+        settle().await;
+        assert_eq!(s.get(retry).unwrap().title, "fail (retry 1)");
+        assert_eq!(s.tail(on_error).unwrap(), ["one", "two", "three"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pipe_that_works_runs_once() {
+        let s = scheduler("");
+        let mut events = s.subscribe();
+        let run = Submission {
+            stages: vec![stage("echo")],
+            retry: 2,
+            on_error: vec![stage("echo")],
+        };
+        let ids = s
+            .submit_pipe(run, Principal::local("test"), PathBuf::from("."))
+            .unwrap();
+        assert_eq!(finished(&mut events, ids[0]).await, JobState::Done);
+        tokio::time::sleep(RETRY_DELAY * 4).await;
+        assert_eq!(s.list().len(), 1);
     }
 
     #[tokio::test]

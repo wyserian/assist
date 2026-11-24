@@ -57,6 +57,9 @@ pub struct PipeShape {
     /// For a transform, the slot that gets the rest of the stage text, e.g. `count` in
     /// `head 3`.
     pub arg: Option<&'static str>,
+    /// The output comes from outside the owner's control (OCR, web pages, messages); a
+    /// later stage that sends always asks (taint rule, PLAN.md section 3.6).
+    pub untrusted: bool,
 }
 
 impl PipeShape {
@@ -65,12 +68,14 @@ impl PipeShape {
         input: DataKind::Empty,
         output: DataKind::Empty,
         arg: None,
+        untrusted: false,
     };
     /// Starts a pipe: reads nothing, writes lines (a script's output).
     pub const SOURCE: Self = Self {
         input: DataKind::Empty,
         output: DataKind::Lines,
         arg: None,
+        untrusted: false,
     };
 
     /// A transform from lines to `output`, taking the rest of the stage as `arg`.
@@ -79,6 +84,7 @@ impl PipeShape {
             input: DataKind::Lines,
             output,
             arg,
+            untrusted: false,
         }
     }
 

@@ -1,7 +1,12 @@
 ---
 source: crates/assist-core/src/dialog.rs
-expression: "transcript(Arc::clone(&full),\n&[\"run build | head 3 | count\", \"Run build | save Out File.txt\", \"yes\",\n\"head 3 | count\", \"open firefox | count\", \"run build | open firefox\",\n\"run build | fly away\", \"$ ls | grep src\",])"
+expression: "transcript(Arc::clone(&full),\n&[\"run report\", \"yes\", \"run build | head 3 | count\",\n\"Run build | save Out File.txt\", \"yes\", \"head 3 | count\",\n\"open firefox | count\", \"run build | open firefox\", \"run build | fly away\",\n\"$ ls | grep src\",])"
 ---
+> run report
+< run_script: script = build | head: count = 3 | count, retry 1, on error run_script: script = build | save: path = errors.txt?
+> yes
+< Running build.
+! run_script: script = build | head: count = 3 | count, retry 1, on error run_script: script = build | save: path = errors.txt
 > run build | head 3 | count
 < Running build.
 ! run_script: script = build | head: count = 3 | count

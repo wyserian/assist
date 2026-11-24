@@ -279,7 +279,11 @@ publish selected facts to the hub. (Built in Phase 3 together with its first con
   (`fs.write`). Later: `map` and `json` (need an expression syntax), `post <url>` (`send`,
   with the first HTTP action).
 - Control: `on_error = "<pipe>"`, `retry = N`, `if <fact condition>`. No visual editor.
-- Saved pipes are named commands in config.
+- Saved pipes are named commands in config: `[pipes] name = { run, retry, on_error }`, run with
+  "run <name>". `on_error` is a pipe or another saved pipe's name. Retries (2 s apart) and the
+  `on_error` pipe run as new jobs in the same lane slot. One confirmation covers everything
+  that may run, so the readback lists the retry count and the `on_error` stages. A saved pipe
+  that cannot work fails config loading; a stage this device lacks does not.
 
 ### 3.12 Triggers
 
@@ -987,6 +991,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Semantic stage deferred, filler words instead. The 32 recorded misses from real `listen` use were filler words before a valid command ("can you open ...", "okay so i'm gonna ...", "okay open firebox"), apps missing from `[apps]` (chrome, explorer, visual studio), recognition garbage and chatter; none was a paraphrase an embedding model would fix better. An embedding model also needs ONNX Runtime (`ort`, whose static build would clash with the onnxruntime inside sherpa's static library) and a tokenizer. The rule matcher now retries without leading/trailing filler words (as-said first, so fillers inside a text slot stay). Revisit with the miss log |
 | 2026-11-25 | Wyoming adapter deferred: Phase 2's done-when ("open firefox" by voice within budget) is met, the owner runs no Wyoming server, and a Piper voice through it would also need PCM playback. Built when a Wyoming server is wanted or with the Phase 9 room microphones. Phase 2 closes with release 0.3.0 |
 | 2026-11-25 | Pipes (Phase 3 step 1): `PipeShape { input, output, arg }` on every action manifest; transforms are actions in `assist-actions` (feature `transforms`) with a raw `<name> <arg>` syntax, because phrase matching normalizes text (paths, regexes). The scheduler runs a pipe as one task holding one lane slot (per-stage slots could deadlock a pipe longer than the lane), stages joined by bounded channels; a single job is a one-stage pipe. `JobSummary.group` marks stages (not persisted yet). `map`, `json` and `post` wait for an expression syntax and an HTTP action |
+| 2026-11-25 | Saved pipes and pipe control (Phase 3 step 2): `[pipes]`, `run_pipe` phrase-only command expanded by the dialog, `retry` (max 10) and `on_error` in the scheduler (`Submission`), policy over every stage that may run. Taint rule: `PipeShape.untrusted`; a `send` stage after an untrusted one always asks. No action declares untrusted output yet (OCR and web actions will). `if <fact>` comes with facts in step 3 |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

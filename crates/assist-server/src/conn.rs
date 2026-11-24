@@ -174,14 +174,8 @@ impl Conn {
             waiting,
         };
         for pipe in reply.run {
-            let stages = pipe
-                .into_iter()
-                .map(|plan| {
-                    let title = engine.readback(&plan);
-                    (plan, title)
-                })
-                .collect();
-            match scheduler.submit_pipe(stages, self.principal.clone(), self.cwd.clone()) {
+            let run = engine.submission(pipe);
+            match scheduler.submit_pipe(run, self.principal.clone(), self.cwd.clone()) {
                 Ok(ids) => {
                     for id in ids {
                         self.jobs.insert(id);

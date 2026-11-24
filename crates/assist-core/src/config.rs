@@ -32,6 +32,9 @@ pub struct Config {
     /// Named scripts; values are read by the script action.
     #[serde(default)]
     pub scripts: BTreeMap<String, toml::Value>,
+    /// Saved pipes, run by name ("run morning").
+    #[serde(default)]
+    pub pipes: BTreeMap<String, SavedPipe>,
     /// Contacts by name, value is the phone number.
     #[serde(default)]
     pub contacts: BTreeMap<String, String>,
@@ -214,6 +217,24 @@ fn duration<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::E
     })
 }
 
+/// Most times a saved pipe may be retried.
+pub const MAX_RETRY: u32 = 10;
+
+/// A saved pipe (`[pipes]`), e.g.
+/// `report = { run = "run build | filter error | save errors.txt", retry = 2 }`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedPipe {
+    /// The pipe, as typed in the shell.
+    pub run: String,
+    /// Runs again up to this many times when a stage fails.
+    #[serde(default)]
+    pub retry: u32,
+    /// A pipe, or another saved pipe's name, to run when the last try failed.
+    #[serde(default)]
+    pub on_error: Option<String>,
+}
+
 /// Settings for one command (`[commands.<name>]`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -297,6 +318,11 @@ impl Config {
                 "[search] url must start with https:// or http:// and contain {query}".to_owned(),
             ));
         }
+        if let Some((name, _)) = config.pipes.iter().find(|(_, p)| p.retry > MAX_RETRY) {
+            return Err(ConfigError::Invalid(format!(
+                "[pipes] {name}: retry must be at most {MAX_RETRY}"
+            )));
+        }
         if let Some(key) = config.replies.keys().find(|k| Line::from_key(k).is_none()) {
             return Err(ConfigError::Invalid(format!(
                 "[replies] {key} is not a known reply"
@@ -334,7 +360,8 @@ impl Config {
         }
     }
 
-    /// Value lists that `list:<name>` slots match against: `apps`, `contacts`, `scripts`.
+    /// Value lists that `list:<name>` slots match against: `apps`, `contacts`, `scripts`,
+    /// `pipes`.
     pub fn lists(&self) -> BTreeMap<String, Vec<String>> {
         BTreeMap::from([
             ("apps".to_owned(), self.apps.keys().cloned().collect()),
@@ -343,6 +370,7 @@ impl Config {
                 self.contacts.keys().cloned().collect(),
             ),
             ("scripts".to_owned(), self.scripts.keys().cloned().collect()),
+            ("pipes".to_owned(), self.pipes.keys().cloned().collect()),
         ])
     }
 }
@@ -469,7 +497,7 @@ wake_word = \" bumblebee \"
         let config = Config::from_toml("").unwrap();
         assert_eq!(config.config_version, CURRENT_VERSION);
         assert!(config.apps.is_empty());
-        assert_eq!(config.lists().len(), 3);
+        assert_eq!(config.lists().len(), 4);
     }
 
     #[test]

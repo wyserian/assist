@@ -8,3 +8,8 @@ phrases = [
     "(run|execute) (the)? .script. (script)?",
     "start (the)? .script. script",
 ]
+
+# Run saved pipes ([pipes] in config.toml); the dialog expands the name into its stages.
+[run_pipe]
+slots = { pipe = "list:pipes" }
+phrases = ["(run|start) (the)? .pipe. (pipe)?"]

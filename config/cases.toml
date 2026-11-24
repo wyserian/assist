@@ -111,6 +111,17 @@ text = "turn volume to twenty-five"
 command = "set_volume"
 slots = { level = "25" }
 
+# saved pipes
+[[case]]
+text = "run errors"
+command = "run_pipe"
+slots = { pipe = "errors" }
+
+[[case]]
+text = "start the errors pipe"
+command = "run_pipe"
+slots = { pipe = "errors" }
+
 # filler words around a command
 [[case]]
 text = "can you open firefox"

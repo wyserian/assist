@@ -18,9 +18,13 @@ use crate::normalize::{normalize, parse_number};
 use crate::phrases::{CommandSpec, PhraseSet};
 use crate::policy::{Capability, Decision, Policy, Principal, Request, Trust};
 use crate::replies::{Line, Replies};
+use crate::scheduler::Submission;
 
 /// The built-in command for `$ ...` input; its slot `command` holds the exact text.
 pub const SHELL: &str = "shell";
+
+/// The phrase-only command for "run <saved pipe>"; the dialog expands it into the pipe.
+pub const RUN_PIPE: &str = "run_pipe";
 
 /// How long a question waits for its answer.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
@@ -107,7 +111,7 @@ impl Engine {
                 .or_default()
                 .extend(command.ask.clone());
         }
-        Ok(Self {
+        let engine = Self {
             replies: Replies::new(&config),
             config,
             phrases: phrases.clone(),
@@ -116,7 +120,20 @@ impl Engine {
             commands,
             asks,
             offer_shell,
-        })
+        };
+        // A saved pipe that cannot work is a config error now, not when its trigger fires.
+        // A stage this device lacks is not: the same config serves devices with other
+        // actions, and running it says so.
+        for name in engine.config.pipes.keys() {
+            if let Err((line, text)) = engine.saved_pipe(name) {
+                if line == Line::Unavailable {
+                    continue;
+                }
+                let reason = engine.say(line, &[("text", &text)]);
+                return Err(ConfigError::Invalid(format!("[pipes] {name}: {reason}")).into());
+            }
+        }
+        Ok(engine)
     }
 
     /// The same engine with other phrases, e.g. after a phrase was added.
@@ -176,11 +193,24 @@ impl Engine {
                 (plan, intent.ambiguous)
             }
         };
-        let decision = self
-            .decision(principal, &plan)
-            .map_or("unavailable", Decision::as_str);
+        let saved = (plan.command == RUN_PIPE)
+            .then(|| {
+                plan.slots
+                    .get("pipe")
+                    .map(|name| self.saved_pipe(name).ok())
+            })
+            .flatten()
+            .flatten();
+        let decision = match &saved {
+            Some(pipe) => self.pipe_decision(principal, pipe),
+            None => self.decision(principal, &plan),
+        };
+        let decision = decision.map_or("unavailable", Decision::as_str);
         Some(Explanation {
-            readback: self.readback(&plan),
+            readback: match &saved {
+                Some(pipe) => self.readback_pipe(pipe),
+                None => self.readback(&plan),
+            },
             command: plan.command,
             slots: plan.slots,
             ambiguous,
@@ -206,10 +236,87 @@ impl Engine {
         }
     }
 
-    /// A pipe read back stage by stage: `run_script: script = build | count`.
-    pub fn readback_pipe(&self, pipe: &[Plan]) -> String {
-        let stages: Vec<String> = pipe.iter().map(|plan| self.readback(plan)).collect();
-        stages.join(" | ")
+    /// A pipe read back stage by stage, `run_script: script = build | count`, with what
+    /// runs when it fails.
+    pub fn readback_pipe(&self, pipe: &Pipe) -> String {
+        let stages = |plans: &[Plan]| {
+            let stages: Vec<String> = plans.iter().map(|plan| self.readback(plan)).collect();
+            stages.join(" | ")
+        };
+        let mut text = stages(&pipe.stages);
+        if pipe.retry > 0 {
+            text.push_str(&format!(", retry {}", pipe.retry));
+        }
+        if !pipe.on_error.is_empty() {
+            text.push_str(&format!(", on error {}", stages(&pipe.on_error)));
+        }
+        text
+    }
+
+    /// The pipe to submit, each stage with its title.
+    pub fn submission(&self, pipe: Pipe) -> Submission {
+        let titled = |plans: Vec<Plan>| -> Vec<(Plan, String)> {
+            plans
+                .into_iter()
+                .map(|plan| {
+                    let title = self.readback(&plan);
+                    (plan, title)
+                })
+                .collect()
+        };
+        Submission {
+            stages: titled(pipe.stages),
+            retry: pipe.retry,
+            on_error: titled(pipe.on_error),
+        }
+    }
+
+    /// `a | b | c` as plans: every stage resolves, and each fits the output of the one
+    /// before (PLAN.md section 3.11). The error is the reply line and the stage it is about.
+    fn parse_pipe(&self, text: &str) -> Result<Vec<Plan>, (Line, String)> {
+        let mut pipe: Vec<Plan> = Vec::new();
+        for text in text.split('|').map(str::trim) {
+            let Some(plan) = self.stage(text) else {
+                return Err((Line::BadStage, text.to_owned()));
+            };
+            let shape = self.commands.get(&plan.command).map(|info| info.pipe);
+            let problem = match (pipe.last(), shape) {
+                (_, None) => Some(Line::Unavailable),
+                (None, Some(shape)) if shape.is_transform() => Some(Line::PipeStart),
+                (Some(_), Some(shape)) if !shape.is_transform() => Some(Line::NoInput),
+                (Some(before), Some(_)) => {
+                    let output = self.commands.get(&before.command).map(|i| i.pipe.output);
+                    (output != Some(DataKind::Lines)).then_some(Line::NoOutput)
+                }
+                (None, Some(_)) => None,
+            };
+            if let Some(line) = problem {
+                return Err((line, text.to_owned()));
+            }
+            pipe.push(plan);
+        }
+        Ok(pipe)
+    }
+
+    /// A saved pipe from `[pipes]`; its `on_error` is a pipe or another saved pipe's name.
+    fn saved_pipe(&self, name: &str) -> Result<Pipe, (Line, String)> {
+        let saved = self
+            .config
+            .pipes
+            .get(name)
+            .ok_or_else(|| (Line::BadStage, name.to_owned()))?;
+        let on_error = match saved.on_error.as_deref() {
+            Some(text) => {
+                let text = self.config.pipes.get(text).map_or(text, |p| p.run.as_str());
+                self.parse_pipe(text)?
+            }
+            None => Vec::new(),
+        };
+        Ok(Pipe {
+            stages: self.parse_pipe(&saved.run)?,
+            retry: saved.retry,
+            on_error,
+        })
     }
 
     /// One pipe stage as a plan: a transform written `<name> <arg>`, or any command the
@@ -243,13 +350,24 @@ impl Engine {
         })
     }
 
-    /// The strictest decision over a pipe's stages; `None` if any stage is unavailable.
-    fn pipe_decision(&self, principal: &Principal, pipe: &[Plan]) -> Option<Decision> {
-        pipe.iter()
-            .map(|plan| self.decision(principal, plan))
-            .try_fold(Decision::Allow, |worst, decision| {
-                Some(worst.max(decision?))
-            })
+    /// The strictest decision over every stage that may run, the `on_error` pipe included;
+    /// `None` if any stage is unavailable. Taint rule: once a stage's output is untrusted,
+    /// a later stage that sends always asks (PLAN.md section 3.6).
+    fn pipe_decision(&self, principal: &Principal, pipe: &Pipe) -> Option<Decision> {
+        let mut worst = Decision::Allow;
+        for plans in [&pipe.stages, &pipe.on_error] {
+            let mut tainted = false;
+            for plan in plans {
+                let mut decision = self.decision(principal, plan)?;
+                let info = self.commands.get(&plan.command)?;
+                if tainted && info.capabilities.contains(&Capability::Send) {
+                    decision = decision.max(Decision::Confirm);
+                }
+                tainted |= info.pipe.untrusted;
+                worst = worst.max(decision);
+            }
+        }
+        Some(worst)
     }
 
     /// A slot value as a confirmation shows it: text quoted, a contact with its number, so
@@ -273,9 +391,9 @@ impl Engine {
 
     /// The confirmation question for `pipe`: a single command's own `confirm` line with
     /// shown slot values, else the readback.
-    fn confirm_question(&self, pipe: &[Plan]) -> String {
-        let own = match pipe {
-            [plan] => self.command_line(plan, |spec| spec.confirm.as_deref(), true),
+    fn confirm_question(&self, pipe: &Pipe) -> String {
+        let own = match (pipe.stages.as_slice(), pipe.on_error.is_empty()) {
+            ([plan], true) => self.command_line(plan, |spec| spec.confirm.as_deref(), true),
             _ => None,
         };
         own.unwrap_or_else(|| self.say(Line::Confirm, &[("action", &self.readback_pipe(pipe))]))
@@ -362,6 +480,28 @@ pub struct Plan {
     pub typed: bool,
 }
 
+/// What a reply runs: a pipe's stages (one for a plain command) and, for a saved pipe, how
+/// to handle failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pipe {
+    /// Stages in order; each one's lines feed the next.
+    pub stages: Vec<Plan>,
+    /// Runs again up to this many times when a stage fails.
+    pub retry: u32,
+    /// Runs when the last try failed; empty for nothing.
+    pub on_error: Vec<Plan>,
+}
+
+impl From<Plan> for Pipe {
+    fn from(plan: Plan) -> Self {
+        Self {
+            stages: vec![plan],
+            retry: 0,
+            on_error: Vec::new(),
+        }
+    }
+}
+
 impl Plan {
     fn shell(command: &str, typed: bool) -> Self {
         Self {
@@ -379,7 +519,7 @@ pub struct Reply {
     pub say: Vec<String>,
     /// What to schedule now, in order: each entry is one plan, or the stages of a pipe whose
     /// lines flow from one stage to the next.
-    pub run: Vec<Vec<Plan>>,
+    pub run: Vec<Pipe>,
     /// The input, normalized, when it matched no command; callers record it so it can
     /// become a phrase.
     pub missed: Option<String>,
@@ -428,8 +568,7 @@ enum State {
         candidates: Vec<String>,
     },
     Confirming {
-        /// One plan, or the stages of a pipe.
-        pipe: Vec<Plan>,
+        pipe: Pipe,
         intent: Option<Intent>,
     },
 }
@@ -543,7 +682,7 @@ impl Dialog {
             if command.is_empty() {
                 reply.say.push(self.engine.say(Line::EmptyShell, &[]));
             } else {
-                self.decide(vec![Plan::shell(command, true)], None, reply);
+                self.decide(Plan::shell(command, true).into(), None, reply);
             }
             return;
         }
@@ -612,7 +751,7 @@ impl Dialog {
                     .say
                     .push(self.engine.say(Line::OfferShell, &[("text", raw)]));
                 self.state = State::Confirming {
-                    pipe: vec![plan],
+                    pipe: plan.into(),
                     intent: None,
                 };
                 return;
@@ -631,7 +770,8 @@ impl Dialog {
     }
 
     fn advance(&mut self, mut intent: Intent, reply: &mut Reply) {
-        if !self.engine.commands.contains_key(&intent.command) {
+        let saved = intent.command == RUN_PIPE;
+        if !saved && !self.engine.commands.contains_key(&intent.command) {
             reply.say.push(self.engine.say(Line::Unavailable, &[]));
             return;
         }
@@ -649,47 +789,37 @@ impl Dialog {
             self.state = State::Asking { intent, slot };
             return;
         }
+        if saved {
+            let name = intent.slots.get("pipe").cloned().unwrap_or_default();
+            return match self.engine.saved_pipe(&name) {
+                Ok(pipe) => self.decide(pipe, None, reply),
+                Err((line, text)) => reply.say.push(self.engine.say(line, &[("text", &text)])),
+            };
+        }
         let plan = Plan {
             command: intent.command.clone(),
             slots: intent.slots.clone(),
             typed: false,
         };
-        self.decide(vec![plan], Some(intent), reply);
+        self.decide(plan.into(), Some(intent), reply);
     }
 
-    /// `a | b | c`: every stage must resolve, and each must fit the output of the one
-    /// before (PLAN.md section 3.11). Then the pipe goes through policy as one.
+    /// `a | b | c`, decided as one.
     fn pipe(&mut self, raw: &str, reply: &mut Reply) {
-        let engine = Arc::clone(&self.engine);
-        let mut pipe: Vec<Plan> = Vec::new();
-        for text in raw.split('|').map(str::trim) {
-            let Some(plan) = engine.stage(text) else {
-                reply
-                    .say
-                    .push(engine.say(Line::BadStage, &[("text", text)]));
-                return;
-            };
-            let shape = engine.commands.get(&plan.command).map(|info| info.pipe);
-            let problem = match (pipe.last(), shape) {
-                (_, None) => Some(Line::BadStage),
-                (None, Some(shape)) if shape.is_transform() => Some(Line::PipeStart),
-                (Some(_), Some(shape)) if !shape.is_transform() => Some(Line::NoInput),
-                (Some(before), Some(_)) => {
-                    let output = engine.commands.get(&before.command).map(|i| i.pipe.output);
-                    (output != Some(DataKind::Lines)).then_some(Line::NoOutput)
-                }
-                (None, Some(_)) => None,
-            };
-            if let Some(line) = problem {
-                reply.say.push(engine.say(line, &[("text", text)]));
-                return;
+        match self.engine.parse_pipe(raw) {
+            Ok(stages) => {
+                let pipe = Pipe {
+                    stages,
+                    retry: 0,
+                    on_error: Vec::new(),
+                };
+                self.decide(pipe, None, reply);
             }
-            pipe.push(plan);
+            Err((line, text)) => reply.say.push(self.engine.say(line, &[("text", &text)])),
         }
-        self.decide(pipe, None, reply);
     }
 
-    fn decide(&mut self, pipe: Vec<Plan>, intent: Option<Intent>, reply: &mut Reply) {
+    fn decide(&mut self, pipe: Pipe, intent: Option<Intent>, reply: &mut Reply) {
         match self.engine.pipe_decision(&self.owner, &pipe) {
             None => reply.say.push(self.engine.say(Line::Unavailable, &[])),
             Some(Decision::Deny) => {
@@ -706,11 +836,11 @@ impl Dialog {
         }
     }
 
-    fn submit(&mut self, pipe: Vec<Plan>, intent: Option<Intent>, reply: &mut Reply) {
+    fn submit(&mut self, pipe: Pipe, intent: Option<Intent>, reply: &mut Reply) {
         if intent.is_some() {
             self.last = intent;
         }
-        if let Some(first) = pipe.first() {
+        if let Some(first) = pipe.stages.first() {
             reply.say.extend(self.engine.started(first));
         }
         reply.run.push(pipe);
@@ -798,7 +928,7 @@ impl Dialog {
         }
     }
 
-    fn confirm(&mut self, pipe: Vec<Plan>, intent: Option<Intent>, norm: &str, reply: &mut Reply) {
+    fn confirm(&mut self, pipe: Pipe, intent: Option<Intent>, norm: &str, reply: &mut Reply) {
         if YES.contains(&norm) {
             if self.owner.trust == Trust::Voice && !self.vouched {
                 reply.say.push(self.engine.say(Line::UnknownVoice, &[]));
@@ -885,6 +1015,10 @@ dad = "+910000000001"
 
 [commands.send_sms]
 risky = true
+
+[pipes]
+report = { run = "run build | head 3 | count", retry = 1, on_error = "alert" }
+alert = { run = "run build | save errors.txt" }
 "#;
 
     fn commands() -> BTreeMap<String, CommandInfo> {
@@ -971,6 +1105,8 @@ risky = true
             transcript(
                 Arc::clone(&full),
                 &[
+                    "run report",
+                    "yes",
                     "run build | head 3 | count",
                     "Run build | save Out File.txt",
                     "yes",
@@ -1082,6 +1218,54 @@ risky = true
         assert!(dialog.is_waiting());
         let vouched = dialog.handle_vouched(&owner, "yes", true, now);
         assert_eq!(vouched.run.len(), 1);
+    }
+
+    #[test]
+    fn a_saved_pipe_that_cannot_run_is_a_config_error() {
+        let config = format!(
+            "{CONFIG}bad = {{ run = \"head 3\" }}
+"
+        );
+        let config = Arc::new(Config::from_toml(&config).unwrap());
+        let phrases = PhraseSet::default_en().unwrap();
+        let err = Engine::new(config, &phrases, commands(), true).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "[pipes] bad: \"head 3\" needs input: put a command and | before it."
+        );
+    }
+
+    #[test]
+    fn untrusted_output_reaching_send_always_asks() {
+        let mut commands = commands();
+        let transform = PipeShape::transform(DataKind::Lines, None);
+        let info = |capabilities: Vec<Capability>, untrusted| CommandInfo {
+            capabilities,
+            owner_defined: false,
+            pipe: PipeShape {
+                untrusted,
+                ..transform
+            },
+        };
+        commands.insert("fetch".to_owned(), info(vec![C::Read], true));
+        commands.insert("mail".to_owned(), info(vec![C::Send], false));
+        let config = format!(
+            "{CONFIG}
+[policy]
+send = {{ local = \"allow\" }}
+"
+        );
+        let config = Arc::new(Config::from_toml(&config).unwrap());
+        let engine = Arc::new(
+            Engine::new(config, &PhraseSet::default_en().unwrap(), commands, true).unwrap(),
+        );
+        let owner = Principal::local("cli");
+        let mut dialog = Dialog::new(engine, owner.clone());
+        let clean = dialog.handle(&owner, "run build | mail", Instant::now());
+        assert_eq!(clean.run.len(), 1);
+        let tainted = dialog.handle(&owner, "run build | fetch | mail", Instant::now());
+        assert!(tainted.run.is_empty());
+        assert!(dialog.is_waiting());
     }
 
     #[test]
