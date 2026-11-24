@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename", "screen"]
+default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename", "screen", "record"]
 shell = ["dep:process-wrap", "dep:tokio"]
 scripts = ["shell", "dep:toml"]
 apps = ["dep:open", "dep:tokio", "dep:toml"]
@@ -18,6 +18,7 @@ transforms = ["dep:regex", "dep:tokio"]
 facts = ["dep:windows"]
 rename = ["dep:serde", "dep:serde_json", "dep:tokio"]
 screen = ["dep:xcap", "dep:windows", "dep:tokio"]
+record = ["shell"]
 
 [dependencies]
 assist-core.workspace = true

@@ -107,6 +107,9 @@ pub enum Capability {
     /// Daemon administration (stop all, revoke clients).
     #[serde(rename = "admin")]
     Admin,
+    /// Record the microphone or the screen.
+    #[serde(rename = "record")]
+    Record,
 }
 
 /// The policy's answer. Ordered from least to most strict.
@@ -170,7 +173,7 @@ use Decision::{Allow, Confirm, Deny};
 ///
 /// shortcut: "confirm on screen" for voice and the autopilot path and recipient scopes are a
 /// plain `Confirm`; split them out when voice and autopilot actions exist.
-const DEFAULTS: [(Capability, [Decision; 5]); 12] = [
+const DEFAULTS: [(Capability, [Decision; 5]); 13] = [
     (C::Read, [Allow, Allow, Allow, Confirm, Allow]),
     (C::Apps, [Allow, Allow, Allow, Confirm, Allow]),
     (C::Media, [Allow, Allow, Allow, Confirm, Allow]),
@@ -183,6 +186,7 @@ const DEFAULTS: [(Capability, [Decision; 5]); 12] = [
     (C::SecretsWrite, [Allow, Deny, Deny, Deny, Deny]),
     (C::ConfigWrite, [Allow, Deny, Deny, Deny, Deny]),
     (C::Admin, [Allow, Deny, Deny, Deny, Deny]),
+    (C::Record, [Allow, Confirm, Confirm, Deny, Deny]),
 ];
 
 const COLUMNS: [Trust; 5] = [
@@ -278,6 +282,15 @@ mod tests {
         assert_eq!(decide(&p, Trust::Local, &[C::Send], false, false), Confirm);
         assert_eq!(
             decide(&p, Trust::Autopilot, &[C::Admin], false, false),
+            Deny
+        );
+        assert_eq!(decide(&p, Trust::Local, &[C::Record], false, false), Allow);
+        assert_eq!(
+            decide(&p, Trust::Voice, &[C::Record], false, false),
+            Confirm
+        );
+        assert_eq!(
+            decide(&p, Trust::Untrusted, &[C::Record], false, false),
             Deny
         );
     }

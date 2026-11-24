@@ -124,6 +124,16 @@ command = "ocr"
 text = "what does the screen say"
 command = "ocr"
 
+[[case]]
+text = "record the screen"
+command = "record"
+slots = { spec = "the screen" }
+
+[[case]]
+text = "start recording audio for 30 seconds"
+command = "record"
+slots = { spec = "audio for 30 seconds" }
+
 # saved pipes
 [[case]]
 text = "run errors"

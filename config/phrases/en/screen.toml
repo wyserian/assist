@@ -8,6 +8,11 @@ phrases = [
     "screenshot (please)?",
 ]
 
+[record]
+slots = { spec = "text" }
+reply = "Recording."
+phrases = ["(start)? (record|recording) .spec."]
+
 [ocr]
 reply = "Reading the text."
 phrases = [

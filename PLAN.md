@@ -165,6 +165,7 @@ Default table (overridable in config). Decisions: `allow | confirm | deny`.
 | `send` (sms, call, telegram, post) | confirm | confirm | confirm by voice | confirm | only to the owner (`notify`, `telegram me`), else confirm |
 | `net.scan` | confirm + scope allowlist | deny | deny | deny | deny |
 | `secrets.write`, `config.write`, `admin` | allow (dashboard) | deny | deny | deny | deny |
+| `record` (microphone, screen) | allow | confirm | confirm | deny | deny |
 
 "confirm" for autopilot means the step waits in the dashboard **Waiting** tab (or Telegram) until
 you answer; the goal pauses meanwhile.
@@ -499,7 +500,7 @@ Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM plan
 | VAD, wake word, STT, speaker verification | official `sherpa-onnx` crate (**decided** by the Phase 2 spike, `spikes/voice`): Silero VAD, open-vocabulary keyword spotting, streaming Zipformer; Moonshine/Parakeet for dictation and files. Vosk dropped. Capture keeps a 1 s pre-roll; streaming models get 2 s of zero padding after the endpoint to flush the last word |
 | TTS | OS TTS **(default)** (SAPI/WinRT, speech-dispatcher, Android TextToSpeech); Piper/Kokoro as an **external process** (Piper is now GPL-3.0 via espeak-ng) |
 | Interop | Wyoming protocol adapter (reuse external wake/STT/TTS servers, remote STT); deferred from Phase 2 until a Wyoming server or the Phase 9 room microphones use it |
-| Recording | `ffmpeg` (external) |
+| Recording | `ffmpeg` (external; `record` action built in Phase 3) |
 
 ### Vision / web
 
@@ -1027,6 +1028,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Triggers (Phase 3 step 4): rules in core (`trigger.rs`: schedule parsing and next time, fact edges; `Engine::unattended`), clock and folder watching in `assist-cli` (no OS I/O in core). New crates, approved: `jiff` 1.0 (local time zone, DST; MIT OR Unlicense) and `notify` 9.0 (CC0-1.0, deny exception; brings `xxhash-rust`, BSL-1.0, deny exception) |
 | 2026-11-25 | Bulk rename (Phase 3 step 5a): `rename <find> [to] <replace> in <folder>` (files in one folder, at most 1000, no clashes or swaps) and `undo [job]`, both `rename.bulk` (confirm). Action `preview` hook plus frozen `preview` slot gives the exact file list in the confirmation; undo records in `<data>/undo/<job>.json`. `Engine::new(config, phrases, Device)` bundles commands, shell offer, facts and the previewer |
 | 2026-11-25 | Screenshot and OCR (Phase 3 step 5b): `screenshot [file]` (xcap, primary monitor, PNG, default `Pictures/assist-<job>.png`) and `ocr [screen | image]` (Windows built-in OCR through WinRT, safe calls; output untrusted so the taint rule applies). Windows only for now: xcap on Linux needs PipeWire, XCB and libclang at build time, and Linux has no OCR engine yet (`ocrs` or Tesseract later). Typed commands also work as pipe stages (`ocr scan.png \| filter error`) |
+| 2026-11-25 | Recording (Phase 3 step 5c): `record screen|audio [for 30s] [to file]` runs ffmpeg as an external process (owner chose ffmpeg for both; not installed yet, so the action says how to install it). Matroska output stays playable when stopped. Windows: gdigrab and DirectShow (first microphone ffmpeg lists); Linux: x11grab and Pulse. New capability `record`: allow local, confirm remote and voice, deny untrusted and autopilot. Ends at `[jobs] timeout`. Not yet run for real (no ffmpeg on the laptop) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

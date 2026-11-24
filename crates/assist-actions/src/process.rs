@@ -62,7 +62,7 @@ pub(crate) async fn run(mut command: Command, cwd: &Path, out: &Output) -> Resul
 }
 
 /// Whether `program` (with extension on Windows) is in a `PATH` directory.
-fn on_path(program: &str) -> bool {
+pub(crate) fn on_path(program: &str) -> bool {
     std::env::var_os("PATH")
         .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }

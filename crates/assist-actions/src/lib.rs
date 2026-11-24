@@ -11,6 +11,8 @@ pub mod apps;
 pub mod facts;
 #[cfg(feature = "shell")]
 mod process;
+#[cfg(feature = "record")]
+pub mod record;
 #[cfg(feature = "rename")]
 pub mod rename;
 #[cfg(all(feature = "screen", windows))]
@@ -44,6 +46,8 @@ pub fn builtin() -> Vec<Arc<dyn Action>> {
     actions.extend(rename::all());
     #[cfg(all(feature = "screen", windows))]
     actions.extend(screen::all());
+    #[cfg(feature = "record")]
+    actions.extend(record::all());
     actions
 }
 
