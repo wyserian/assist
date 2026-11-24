@@ -7,6 +7,6 @@ expression: "transcript(Arc::clone(&full), &[\"text mom\", \"cancel\", \"call da
 > cancel
 < Cancelled.
 > call dad
-< call: contact = dad (+910000000001)? (yes/no)
+< Call dad (+910000000001)?
 > stop
 < Cancelled.

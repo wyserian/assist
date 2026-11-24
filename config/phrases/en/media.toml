@@ -2,6 +2,7 @@
 
 [set_volume]
 slots = { level = "number" }
+reply = "Volume {level}."
 phrases = [
     "(set)? (the)? volume (to)? .level. (percent)?",
     "turn (the)? volume (to)? .level. (percent)?",

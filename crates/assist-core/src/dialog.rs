@@ -14,8 +14,9 @@ use assist_proto::rpc::Explanation;
 use crate::config::{Config, ConfigError};
 use crate::matcher::{BuildError, Intent, Matcher, RuleMatcher, SlotType};
 use crate::normalize::{normalize, parse_number};
-use crate::phrases::PhraseSet;
+use crate::phrases::{CommandSpec, PhraseSet};
 use crate::policy::{Capability, Decision, Policy, Principal, Request};
+use crate::replies::{Line, Replies};
 
 /// The built-in command for `$ ...` input; its slot `command` holds the exact text.
 pub const SHELL: &str = "shell";
@@ -78,6 +79,7 @@ pub struct Engine {
     commands: BTreeMap<String, CommandInfo>,
     /// Command -> slot -> question.
     asks: BTreeMap<String, BTreeMap<String, String>>,
+    replies: Replies,
     offer_shell: bool,
 }
 
@@ -103,6 +105,7 @@ impl Engine {
                 .extend(command.ask.clone());
         }
         Ok(Self {
+            replies: Replies::new(&config),
             config,
             phrases: phrases.clone(),
             matcher,
@@ -188,29 +191,81 @@ impl Engine {
             let command = plan.slots.get("command").map_or("", String::as_str);
             return format!("$ {command}");
         }
-        let types = self.matcher.slots(&plan.command);
         let slots: Vec<String> = plan
             .slots
             .iter()
-            .map(|(slot, value)| {
-                let shown = match types.and_then(|t| t.get(slot)) {
-                    Some(SlotType::Text) => format!("{value:?}"),
-                    Some(SlotType::List(list)) if list == "contacts" => {
-                        match self.config.contacts.get(value) {
-                            Some(number) => format!("{value} ({number})"),
-                            None => value.clone(),
-                        }
-                    }
-                    _ => value.clone(),
-                };
-                format!("{slot} = {shown}")
-            })
+            .map(|(slot, value)| format!("{slot} = {}", self.shown(&plan.command, slot, value)))
             .collect();
         if slots.is_empty() {
             plan.command.clone()
         } else {
             format!("{}: {}", plan.command, slots.join(", "))
         }
+    }
+
+    /// A slot value as a confirmation shows it: text quoted, a contact with its number, so
+    /// the owner sees exactly what runs.
+    fn shown(&self, command: &str, slot: &str, value: &str) -> String {
+        match self.matcher.slots(command).and_then(|t| t.get(slot)) {
+            Some(SlotType::Text) => format!("{value:?}"),
+            Some(SlotType::List(list)) if list == "contacts" => {
+                match self.config.contacts.get(value) {
+                    Some(number) => format!("{value} ({number})"),
+                    None => value.to_owned(),
+                }
+            }
+            _ => value.to_owned(),
+        }
+    }
+
+    fn say(&self, line: Line, vars: &[(&str, &str)]) -> String {
+        self.replies.line(line, vars)
+    }
+
+    /// The confirmation question for `plan`: the command's own `confirm` line with shown
+    /// slot values, else the readback.
+    fn confirm_question(&self, plan: &Plan) -> String {
+        match self.command_line(plan, |spec| spec.confirm.as_deref(), true) {
+            Some(question) => question,
+            None => self.say(Line::Confirm, &[("action", &self.readback(plan))]),
+        }
+    }
+
+    /// What is said when `plan` starts: the command's own `reply` line, else a short
+    /// acknowledgement. Shell commands say nothing; their output speaks for them.
+    fn started(&self, plan: &Plan) -> Option<String> {
+        if plan.command == SHELL {
+            return None;
+        }
+        self.command_line(plan, |spec| spec.reply.as_deref(), false)
+            .or_else(|| Some(self.say(Line::Started, &[])))
+    }
+
+    fn command_line(
+        &self,
+        plan: &Plan,
+        template: impl Fn(&CommandSpec) -> Option<&str>,
+        shown: bool,
+    ) -> Option<String> {
+        let template = template(self.phrases.spec(&plan.command)?)?;
+        let values: Vec<(&str, String)> = plan
+            .slots
+            .iter()
+            .map(|(slot, value)| {
+                let value = if shown {
+                    self.shown(&plan.command, slot, value)
+                } else {
+                    value.clone()
+                };
+                (slot.as_str(), value)
+            })
+            .collect();
+        let vars: Vec<(&str, &str)> = values.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        Some(self.replies.fill(template, &vars))
+    }
+
+    fn choice_question(&self, candidates: &[String]) -> String {
+        self.say(Line::DidYouMean, &[("options", &options(candidates))])
     }
 
     fn decision(&self, principal: &Principal, plan: &Plan) -> Option<Decision> {
@@ -371,28 +426,26 @@ impl Dialog {
             return reply;
         }
         if principal != &self.owner {
-            reply.say.push(format!(
-                "This conversation belongs to {}.",
-                self.owner.source
-            ));
+            let line = self
+                .engine
+                .say(Line::OtherOwner, &[("source", &self.owner.source)]);
+            reply.say.push(line);
             return reply;
         }
         if self.is_waiting() && self.deadline.is_some_and(|deadline| now > deadline) {
             self.reset();
-            reply.say.push("The earlier question expired.".to_owned());
+            reply.say.push(self.engine.say(Line::Expired, &[]));
         }
         let norm = normalize(raw);
         if CANCEL.contains(&norm.as_str()) {
             let had_work = self.is_waiting() || !self.queue.is_empty();
             self.reset();
-            reply.say.push(
-                if had_work {
-                    "Cancelled."
-                } else {
-                    "Nothing to cancel."
-                }
-                .to_owned(),
-            );
+            let line = if had_work {
+                Line::Cancelled
+            } else {
+                Line::NothingToCancel
+            };
+            reply.say.push(self.engine.say(line, &[]));
             return reply;
         }
         match std::mem::replace(&mut self.state, State::Idle) {
@@ -419,7 +472,7 @@ impl Dialog {
         if let Some(command) = raw.strip_prefix('$') {
             let command = command.trim();
             if command.is_empty() {
-                reply.say.push("Type a command after $.".to_owned());
+                reply.say.push(self.engine.say(Line::EmptyShell, &[]));
             } else {
                 self.decide(Plan::shell(command, true), None, reply);
             }
@@ -483,16 +536,14 @@ impl Dialog {
             let plan = Plan::shell(raw, false);
             let decision = self.engine.decision(&self.owner, &plan);
             if decision.is_some_and(|d| d != Decision::Deny) {
-                reply.say.push(format!(
-                    "I don't know that command. Run \"{raw}\" in the shell? (yes/no)"
-                ));
+                reply
+                    .say
+                    .push(self.engine.say(Line::OfferShell, &[("text", raw)]));
                 self.state = State::Confirming { plan, intent: None };
                 return;
             }
         }
-        reply
-            .say
-            .push("Sorry, I didn't understand that.".to_owned());
+        reply.say.push(self.engine.say(Line::NotUnderstood, &[]));
     }
 
     fn next(&mut self, reply: &mut Reply) {
@@ -506,14 +557,11 @@ impl Dialog {
 
     fn advance(&mut self, mut intent: Intent, reply: &mut Reply) {
         if !self.engine.commands.contains_key(&intent.command) {
-            reply.say.push(format!(
-                "{} isn't available on this device.",
-                intent.command
-            ));
+            reply.say.push(self.engine.say(Line::Unavailable, &[]));
             return;
         }
         if let Some((slot, candidates)) = intent.ambiguous.pop_first() {
-            reply.say.push(choice_question(&candidates));
+            reply.say.push(self.engine.choice_question(&candidates));
             self.state = State::Choosing {
                 intent,
                 slot,
@@ -536,17 +584,15 @@ impl Dialog {
 
     fn decide(&mut self, plan: Plan, intent: Option<Intent>, reply: &mut Reply) {
         match self.engine.decision(&self.owner, &plan) {
-            None => reply
-                .say
-                .push(format!("{} isn't available on this device.", plan.command)),
-            Some(Decision::Deny) => reply.say.push(format!(
-                "{} is not allowed from {}.",
-                plan.command, self.owner.source
-            )),
+            None => reply.say.push(self.engine.say(Line::Unavailable, &[])),
+            Some(Decision::Deny) => {
+                let line = self
+                    .engine
+                    .say(Line::NotAllowed, &[("source", &self.owner.source)]);
+                reply.say.push(line);
+            }
             Some(Decision::Confirm) => {
-                reply
-                    .say
-                    .push(format!("{}? (yes/no)", self.engine.readback(&plan)));
+                reply.say.push(self.engine.confirm_question(&plan));
                 self.state = State::Confirming { plan, intent };
             }
             Some(Decision::Allow) => self.submit(plan, intent, reply),
@@ -557,6 +603,7 @@ impl Dialog {
         if intent.is_some() {
             self.last = intent;
         }
+        reply.say.extend(self.engine.started(&plan));
         reply.run.push(plan);
     }
 
@@ -570,7 +617,7 @@ impl Dialog {
                     intent.slots.insert(slot, n.to_string());
                 }
                 None => {
-                    reply.say.push("Please say a number.".to_owned());
+                    reply.say.push(self.engine.say(Line::SayNumber, &[]));
                     self.state = State::Asking { intent, slot };
                     return;
                 }
@@ -579,9 +626,8 @@ impl Dialog {
                 let candidates = self.engine.matcher.candidates(&list, &normalize(raw));
                 match candidates.as_slice() {
                     [] => {
-                        reply
-                            .say
-                            .push(format!("I don't know \"{raw}\". Try again, or say cancel."));
+                        let line = self.engine.say(Line::UnknownChoice, &[("text", raw)]);
+                        reply.say.push(line);
                         self.state = State::Asking { intent, slot };
                         return;
                     }
@@ -633,7 +679,7 @@ impl Dialog {
                 self.next(reply);
             }
             None => {
-                reply.say.push(choice_question(&candidates));
+                reply.say.push(self.engine.choice_question(&candidates));
                 self.state = State::Choosing {
                     intent,
                     slot,
@@ -653,10 +699,10 @@ impl Dialog {
         }
         if NO.contains(&norm) {
             self.queue.clear();
-            reply.say.push("Okay, not doing that.".to_owned());
+            reply.say.push(self.engine.say(Line::Declined, &[]));
             return;
         }
-        reply.say.push("Please answer yes or no.".to_owned());
+        reply.say.push(self.engine.say(Line::YesOrNo, &[]));
         self.state = State::Confirming { plan, intent };
     }
 
@@ -678,9 +724,8 @@ impl Dialog {
             _ => None,
         };
         let Some(slot) = fits_list.or(only_slot) else {
-            reply
-                .say
-                .push(format!("I couldn't tell what \"{value}\" should replace."));
+            let line = engine.say(Line::UnclearCorrection, &[("text", &value)]);
+            reply.say.push(line);
             return;
         };
         intent.slots.remove(&slot);
@@ -697,12 +742,11 @@ fn correction(norm: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn choice_question(candidates: &[String]) -> String {
+/// "a", "a or b", "a, b or c".
+fn options(candidates: &[String]) -> String {
     match candidates.split_last() {
-        Some((last, rest)) if !rest.is_empty() => {
-            format!("Did you mean {} or {last}?", rest.join(", "))
-        }
-        _ => format!("Did you mean {}?", candidates.join("")),
+        Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+        _ => candidates.join(""),
     }
 }
 
@@ -880,7 +924,7 @@ risky = true
         assert!(dialog.is_waiting());
         let later = start + ANSWER_TIMEOUT + Duration::from_secs(1);
         let reply = dialog.handle(&owner, "open firefox", later);
-        assert_eq!(reply.say, ["The earlier question expired."]);
+        assert_eq!(reply.say, ["That question expired.", "Opening firefox."]);
         assert_eq!(reply.run.len(), 1);
         assert!(!dialog.is_waiting());
     }

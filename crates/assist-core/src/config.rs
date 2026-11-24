@@ -14,6 +14,7 @@ use serde::{Deserialize, Deserializer};
 use crate::dialog::SHELL;
 use crate::phrases::PhraseSet;
 use crate::policy::PolicyOverrides;
+use crate::replies::Line;
 
 /// The config format version this build reads.
 pub const CURRENT_VERSION: u32 = 1;
@@ -52,6 +53,31 @@ pub struct Config {
     /// The local daemon.
     #[serde(default)]
     pub server: ServerConfig,
+    /// Who the assistant is and how it addresses you.
+    #[serde(default)]
+    pub persona: PersonaConfig,
+    /// Reply lines that replace the defaults, keyed as in `phrases/en/replies.toml`.
+    #[serde(default)]
+    pub replies: BTreeMap<String, String>,
+}
+
+/// `[persona]`: the assistant's name and how it addresses the owner.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct PersonaConfig {
+    /// The assistant's name.
+    pub name: String,
+    /// How the assistant addresses you; empty for not at all.
+    pub address: String,
+}
+
+impl Default for PersonaConfig {
+    fn default() -> Self {
+        Self {
+            name: "Bee".to_owned(),
+            address: "Prime".to_owned(),
+        }
+    }
 }
 
 /// `[server]`: where `assist serve` listens.
@@ -230,6 +256,11 @@ impl Config {
             return Err(ConfigError::Invalid(
                 "[search] url must start with https:// or http:// and contain {query}".to_owned(),
             ));
+        }
+        if let Some(key) = config.replies.keys().find(|k| Line::from_key(k).is_none()) {
+            return Err(ConfigError::Invalid(format!(
+                "[replies] {key} is not a known reply"
+            )));
         }
         if !config.server.bind.ip().is_loopback() {
             return Err(ConfigError::Invalid(

@@ -5,6 +5,7 @@ expression: "transcript(Arc::clone(&full), &[\"text mom\", \"I'm late\", \"yes\"
 > text mom
 < What's the message?
 > I'm late
-< send_sms: contact = mom (+910000000000), text = "I'm late"? (yes/no)
+< Text mom (+910000000000): "I'm late"?
 > yes
+< Sending.
 ! send_sms: contact = mom (+910000000000), text = "I'm late"

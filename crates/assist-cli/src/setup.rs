@@ -62,6 +62,19 @@ impl Paths {
     }
 }
 
+/// The config file, or an empty config when there is none.
+pub fn load_config(paths: &Paths) -> Result<Config> {
+    if paths.config.exists() {
+        return Config::load(&paths.config)
+            .with_context(|| format!("config {}", paths.config.display()));
+    }
+    println!(
+        "No config at {}; starting empty (see config/config.example.toml).",
+        paths.config.display()
+    );
+    Ok(Config::from_toml("")?)
+}
+
 /// Everything a running assistant needs.
 pub struct Assistant {
     /// The loaded config.
@@ -82,17 +95,7 @@ pub struct Assistant {
 impl Assistant {
     /// Loads config and opens the data directory. Prints what it cleaned up from the last run.
     pub fn start(paths: &Paths) -> Result<Self> {
-        let config = if paths.config.exists() {
-            Config::load(&paths.config)
-                .with_context(|| format!("config {}", paths.config.display()))?
-        } else {
-            println!(
-                "No config at {}; starting empty (see config/config.example.toml).",
-                paths.config.display()
-            );
-            Config::from_toml("")?
-        };
-        let config = Arc::new(config);
+        let config = Arc::new(load_config(paths)?);
         let audit_dir = paths.data.join("audit");
         let audit = Audit::open(&audit_dir)
             .with_context(|| format!("audit log {}", audit_dir.display()))?;

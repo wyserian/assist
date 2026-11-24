@@ -2,6 +2,7 @@
 
 [search]
 slots = { query = "text" }
+reply = "Searching for {query}."
 phrases = [
     "(search|google|look up) (for)? .query.",
     "search the web for .query.",

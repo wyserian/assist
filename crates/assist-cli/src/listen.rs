@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
+use assist_core::replies::{Line, Replies};
 use assist_proto::Reply;
 use assist_voice::{
     Event, Mic, Recognizer, Segmenter, Silero, Speaker, VadSettings, VoiceError, STT_MODEL,
@@ -33,6 +34,7 @@ enum Heard {
 
 /// Listens until Ctrl+C; Enter pauses and resumes the microphone.
 pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
+    let replies = Replies::new(&crate::setup::load_config(paths)?);
     let models = crate::models::ensure(paths.data()).await?;
     let mut client = Client::connect(paths.data(), true).await?;
     println!("Loading voice models...");
@@ -72,15 +74,17 @@ pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
             heard = heard.recv() => match heard {
                 Some(Heard::Ready(mic)) => {
                     println!("Listening on {mic}. Speak a command; Enter pauses, Ctrl+C stops.");
+                    let greeting = replies.line(Line::Greeting, &[]);
+                    println!("{}", printable(&greeting));
+                    let _ = say_tx.try_send(greeting);
                 }
                 Some(Heard::Text(text)) => {
                     println!("> {}", printable(&text));
                     let reply = client.say(&text).await?;
                     show(&reply);
-                    let spoken = spoken(&reply);
                     // A full queue means replies pile up faster than they are spoken; skip.
-                    if !spoken.is_empty() {
-                        let _ = say_tx.try_send(spoken);
+                    if !reply.say.is_empty() {
+                        let _ = say_tx.try_send(reply.say.join(" "));
                     }
                 }
                 Some(Heard::Failed(error)) => break Err(anyhow::anyhow!("voice: {error}")),
@@ -101,18 +105,6 @@ fn show(reply: &Reply) {
     }
     for job in &reply.jobs {
         println!("[#{}] {}", job.id, printable(&job.title));
-    }
-}
-
-/// What to say aloud: the reply's lines, or else a short acknowledgement of started jobs.
-/// Job titles stay on screen only; they read like "open_app: app = firefox".
-fn spoken(reply: &Reply) -> String {
-    if !reply.say.is_empty() {
-        reply.say.join(" ")
-    } else if reply.jobs.is_empty() {
-        String::new()
-    } else {
-        "OK".to_owned()
     }
 }
 
@@ -170,24 +162,5 @@ fn voice_loop(
         if gone {
             return Ok(());
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use assist_proto::JobBrief;
-
-    #[test]
-    fn speaks_the_reply_or_else_acknowledges_jobs() {
-        let mut reply = Reply::default();
-        assert_eq!(spoken(&reply), "");
-        reply.jobs = vec![JobBrief {
-            id: 1,
-            title: "open_app: app = firefox".to_owned(),
-        }];
-        assert_eq!(spoken(&reply), "OK");
-        reply.say = vec!["Send it?".to_owned(), "Say yes or no.".to_owned()];
-        assert_eq!(spoken(&reply), "Send it? Say yes or no.");
     }
 }

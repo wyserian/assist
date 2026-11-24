@@ -2,6 +2,7 @@
 
 [open_app]
 slots = { app = "list:apps" }
+reply = "Opening {app}."
 phrases = [
     "(open|launch|start) (the)? .app. (app)?",
     "bring up .app.",
@@ -9,4 +10,5 @@ phrases = [
 
 [close_app]
 slots = { app = "list:apps" }
+reply = "Closing {app}."
 phrases = ["(close|quit|exit) (the)? .app. (app)?"]

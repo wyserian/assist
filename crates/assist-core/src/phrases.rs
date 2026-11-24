@@ -51,6 +51,11 @@ pub struct CommandSpec {
     /// Question per slot to ask when it is missing; config `ask` overrides these.
     #[serde(default)]
     pub ask: BTreeMap<String, String>,
+    /// What to say when the command starts, e.g. "Opening {app}." (slot values filled in).
+    pub reply: Option<String>,
+    /// The confirmation question, e.g. "Call {contact}?"; slot values are shown as in the
+    /// readback (text quoted, contacts with their number).
+    pub confirm: Option<String>,
 }
 
 /// All known commands, keyed by name (sorted, so matching is deterministic).

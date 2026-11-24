@@ -38,3 +38,12 @@ url = "https://duckduckgo.com/?q={query}"
 # Overrides of the default policy table (PLAN.md section 3.6). Dotted capability names need quotes.
 [policy]
 shell = { owner_remote = "deny" }
+
+# Who the assistant is and how it addresses you ("" for not at all).
+[persona]
+name = "Bee"
+address = "Prime"
+
+# Reword any reply; keys and defaults are in config/phrases/en/replies.toml.
+[replies]
+not_understood = "Sorry {address}, please say that again."

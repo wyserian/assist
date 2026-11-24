@@ -2,6 +2,8 @@
 
 [run_script]
 slots = { script = "list:scripts" }
+confirm = "Run {script}?"
+reply = "Running {script}."
 phrases = [
     "(run|execute) (the)? .script. (script)?",
     "start (the)? .script. script",

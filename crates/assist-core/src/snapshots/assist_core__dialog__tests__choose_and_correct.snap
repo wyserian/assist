@@ -7,8 +7,9 @@ expression: "transcript(Arc::clone(&full),\n&[\"text sam\", \"roy\", \"Hello the
 > roy
 < What's the message?
 > Hello there
-< send_sms: contact = sam roy (+910000000003), text = "Hello there"? (yes/no)
+< Text sam roy (+910000000003): "Hello there"?
 > no, I meant mom
-< send_sms: contact = mom (+910000000000), text = "Hello there"? (yes/no)
+< Text mom (+910000000000): "Hello there"?
 > yes
+< Sending.
 ! send_sms: contact = mom (+910000000000), text = "Hello there"

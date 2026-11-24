@@ -7,10 +7,10 @@ expression: "transcript(Arc::clone(&full),\n&[\"call sam\", \"bob\", \"2\", \"ma
 > bob
 < Did you mean sam lee or sam roy?
 > 2
-< call: contact = sam roy (+910000000003)? (yes/no)
+< Call sam roy (+910000000003)?
 > maybe
 < Please answer yes or no.
 > no
-< Okay, not doing that.
+< Okay, I won't.
 > cancel
 < Nothing to cancel.

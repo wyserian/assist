@@ -3,10 +3,14 @@
 [send_sms]
 slots = { contact = "list:contacts", text = "text" }
 ask = { contact = "To whom?", text = "What's the message?" }
+confirm = "Text {contact}: {text}?"
+reply = "Sending."
 phrases = [
     "(send (a)? (message|text|sms)|text|message) (to)? .contact. ((saying|that) .text.)?",
 ]
 
 [call]
 slots = { contact = "list:contacts" }
+confirm = "Call {contact}?"
+reply = "Calling {contact}."
 phrases = ["(call|phone|ring|dial) .contact."]
