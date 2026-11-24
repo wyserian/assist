@@ -24,7 +24,7 @@ getrandom = "0.4"
 insta = "1"
 keyring = "4"
 open = "5"
-process-wrap = { version = "10", default-features = false }
+process-wrap = { version = "11", default-features = false }
 regex = "1"
 rusqlite = { version = "0.43", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
