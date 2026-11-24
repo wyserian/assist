@@ -7,7 +7,7 @@
 //! with `clips/said.txt` (`NN text` per line) it also scores word error rate against that.
 //! `wav <engine> <file>` transcribes one file. Models go in `models/` (see PLAN.md section 13).
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -63,6 +63,7 @@ fn main() -> Result<()> {
         Some("record") => record(args.get(1).map(|n| n.parse()).transpose()?),
         Some("eval") => eval(args.get(1).map(String::as_str)),
         Some("convert") => convert(args.get(1).context("missing file name prefix")?),
+        Some("kws") => kws(&args[1..]),
         Some("wav") => {
             let (engine, path) = (args.get(1).context("engine")?, args.get(2).context("path")?);
             let wave = so::Wave::read(path).context("read wav")?;
@@ -479,6 +480,13 @@ fn load(name: &str, words: &BTreeSet<String>) -> Result<Box<dyn Engine>> {
             online(KROKO, "encoder.onnx", "decoder.onnx", "joiner.onnx", Some(hotwords(KROKO, words)?))
         }
         "A kroko beam" => kroko_bpe(words, 0.0),
+        "K kws as asr" => online(
+            KWS,
+            "encoder-epoch-12-avg-2-chunk-16-left-64.onnx",
+            "decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
+            "joiner-epoch-12-avg-2-chunk-16-left-64.onnx",
+            None,
+        ),
         "A kroko bpe1.5" => kroko_bpe(words, 1.5),
         "A kroko bpe3" => kroko_bpe(words, 3.0),
         "B 20M" => online(SMALL, "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx", "joiner-epoch-99-avg-1.int8.onnx", None),
@@ -529,6 +537,151 @@ const ENGINES: &[&str] = &[
     "D vosk",
     "D vosk grammar",
 ];
+
+// ---- keyword spotting ----
+
+const KWS: &str = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01";
+
+/// Keywords: phrase, boost, threshold, label.
+const KEYWORDS: [(&str, &str); 4] = [
+    ("HEY BEE", ":1.5 #0.25 @hey_bee"),
+    ("OKAY BEE", ":1.5 #0.25 @okay_bee"),
+    ("OK BEE", ":1.5 #0.25 @okay_bee"),
+    ("STOP", ":1.0 #0.35 @stop"),
+];
+
+/// sentencepiece BPE: start from characters, keep merging the adjacent pair whose joined
+/// piece ranks best (lowest id in tokens.txt).
+fn bpe(phrase: &str, rank: &HashMap<String, usize>) -> Vec<String> {
+    let mut out = Vec::new();
+    for word in phrase.split_whitespace() {
+        let mut pieces: Vec<String> = word.chars().map(String::from).collect();
+        if let Some(first) = pieces.first_mut() {
+            first.insert(0, WORD_START);
+        }
+        loop {
+            let best = (0..pieces.len().saturating_sub(1))
+                .filter_map(|i| rank.get(&format!("{}{}", pieces[i], pieces[i + 1])).map(|r| (*r, i)))
+                .min();
+            let Some((_, i)) = best else { break };
+            let next = pieces.remove(i + 1);
+            pieces[i].push_str(&next);
+        }
+        out.extend(pieces);
+    }
+    out
+}
+
+fn keywords_buf() -> Result<String> {
+    let src = std::fs::read_to_string(root().join("models").join(KWS).join("tokens.txt"))?;
+    let rank: HashMap<String, usize> = src
+        .lines()
+        .filter_map(|l| l.rsplit_once(' '))
+        .filter_map(|(t, id)| Some((t.to_owned(), id.parse().ok()?)))
+        .collect();
+    let lines: Vec<String> = KEYWORDS
+        .iter()
+        .map(|(phrase, opts)| {
+            // KWS_OPTS="BOOST THRESHOLD" overrides the wake phrases' options for tuning.
+            let opts = match std::env::var("KWS_OPTS") {
+                Ok(o) if *phrase != "STOP" => {
+                    let (b, t) = o.split_once(' ').unwrap_or(("1.5", "0.25"));
+                    let label = opts.rsplit_once('@').map_or("", |x| x.1);
+                    format!(":{b} #{t} @{label}")
+                }
+                _ => opts.to_string(),
+            };
+            format!("{} {opts}", bpe(phrase, &rank).join(" "))
+        })
+        .collect();
+    // Every way the model may spell the name: one line per variant, same label.
+    let lines: Vec<String> = lines
+        .iter()
+        .flat_map(|l| {
+            if !l.contains("\u{2581}BE E") {
+                return vec![l.clone()];
+            }
+            // The model hears "bee" as BE or B, also run into the word before ("HEYBE").
+            ["\u{2581}BE E", "\u{2581}B E E", "\u{2581}BE", "B E", "\u{2581}B"]
+                .iter()
+                .map(|v| l.replace("\u{2581}BE E", v))
+                .collect()
+        })
+        .collect();
+    println!("{}", lines.join(" | "));
+    Ok(lines.join("\n"))
+}
+
+fn spotter(int8: bool) -> Result<so::KeywordSpotter> {
+    let q = if int8 { ".int8" } else { "" };
+    let mut c = so::KeywordSpotterConfig::default();
+    let m = |name: &str| model(&format!("{KWS}/{name}-epoch-12-avg-2-chunk-16-left-64{q}.onnx"));
+    c.model_config.transducer.encoder = m("encoder");
+    c.model_config.transducer.decoder = m("decoder");
+    c.model_config.transducer.joiner = m("joiner");
+    c.model_config.tokens = model(&format!("{KWS}/tokens.txt"));
+    c.model_config.num_threads = 1;
+    c.keywords_buf = Some(keywords_buf()?);
+    so::KeywordSpotter::create(&c).context("create keyword spotter")
+}
+
+/// Keywords found in `samples`, with their start time.
+fn spot(k: &so::KeywordSpotter, samples: &[f32]) -> Vec<(String, f32)> {
+    let stream = k.create_stream();
+    let mut found = Vec::new();
+    let mut run = |chunk: &[f32]| {
+        stream.accept_waveform(RATE, chunk);
+        while k.is_ready(&stream) {
+            k.decode(&stream);
+            if let Some(r) = k.get_result(&stream) {
+                if !r.keyword.is_empty() {
+                    found.push((r.keyword.clone(), r.start_time));
+                    k.reset(&stream);
+                }
+            }
+        }
+    };
+    // Live audio always has lead-in; the files start right at the word.
+    run(&[0.0; 8_000]);
+    for chunk in samples.chunks(CHUNK) {
+        run(chunk);
+    }
+    run(&[0.0; 16_000]);
+    found
+}
+
+/// `kws [int8] [wav files]`: spots keywords in the wav files, or in every recorded clip
+/// (where any hit is a false alarm).
+fn kws(args: &[String]) -> Result<()> {
+    let int8 = args.first().is_some_and(|a| a == "int8");
+    let files = &args[usize::from(int8)..];
+    let loaded = Instant::now();
+    let k = spotter(int8)?;
+    println!("loaded in {} ms (int8: {int8})", loaded.elapsed().as_millis());
+    let mut total = Duration::ZERO;
+    let mut audio = 0.0;
+    if files.is_empty() {
+        for clip in load_clips(cases()?.len())? {
+            let samples = [clip.speech.as_slice(), clip.tail.as_slice()].concat();
+            let start = Instant::now();
+            let found = spot(&k, &samples);
+            total += start.elapsed();
+            audio += samples.len() as f32 / RATE as f32;
+            println!("clip {:02}: {found:?}", clip.number);
+        }
+    } else {
+        for file in files {
+            let wave = so::Wave::read(file).context("read wav")?;
+            let start = Instant::now();
+            let found = spot(&k, wave.samples());
+            total += start.elapsed();
+            audio += wave.num_samples() as f32 / wave.sample_rate() as f32;
+            println!("{file}: {found:?}");
+        }
+    }
+    println!("real-time factor {:.3}", total.as_secs_f32() / audio);
+    Ok(())
+}
 
 // ---- eval ----
 

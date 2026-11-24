@@ -1,19 +1,22 @@
 //! `assist listen`: spoken commands to the daemon, spoken replies back. The daemon gives this
 //! connection voice trust (PLAN.md section 3.6). Audio, recognition and speech run on their
 //! own thread; this task only talks to the daemon.
+//!
+//! Speech counts only after the wake word ("hey Bee") or within [`AWAKE`] of the last
+//! exchange. The wake word or "stop" cuts a reply short (barge-in).
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 use assist_core::replies::{Line, Replies};
 use assist_proto::Reply;
 use assist_voice::{
-    Event, Mic, Recognizer, Segmenter, Silero, Speaker, VadSettings, VoiceError, STT_MODEL,
-    VAD_MODEL,
+    Event, Keyword, Mic, Recognizer, Segmenter, Silero, Speaker, Spotter, VadSettings, VoiceError,
+    KWS_MODEL, STT_MODEL, VAD_MODEL,
 };
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc as async_mpsc;
@@ -22,11 +25,17 @@ use crate::client::Client;
 use crate::display::printable;
 use crate::setup::Paths;
 
+/// How long the assistant keeps listening without the wake word after it was woken or last
+/// spoke, so answers to its questions need no wake word.
+const AWAKE: Duration = Duration::from_secs(8);
+
 /// What the voice thread reports.
 enum Heard {
     /// Models loaded and the microphone is open.
     Ready(String),
-    /// A finished utterance.
+    /// The wake word alone; the command comes next.
+    Woke,
+    /// A finished utterance addressed to the assistant.
     Text(String),
     /// Voice stopped working.
     Failed(String),
@@ -34,7 +43,10 @@ enum Heard {
 
 /// Listens until Ctrl+C; Enter pauses and resumes the microphone.
 pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
-    let replies = Replies::new(&crate::setup::load_config(paths)?);
+    let config = crate::setup::load_config(paths)?;
+    let replies = Replies::new(&config);
+    let wake = config.persona.wake_phrases();
+    let hint = wake.first().cloned().unwrap_or_default();
     let models = crate::models::ensure(paths.data()).await?;
     let mut client = Client::connect(paths.data(), true).await?;
     println!("Loading voice models...");
@@ -49,6 +61,7 @@ pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
             let result = voice_loop(
                 &models,
                 device.as_deref(),
+                &wake,
                 &thread_paused,
                 &heard_tx,
                 &say_rx,
@@ -73,10 +86,15 @@ pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
             },
             heard = heard.recv() => match heard {
                 Some(Heard::Ready(mic)) => {
-                    println!("Listening on {mic}. Speak a command; Enter pauses, Ctrl+C stops.");
+                    println!("Listening on {mic}. Say \"{}\" first; Enter pauses, Ctrl+C stops.", printable(&hint));
                     let greeting = replies.line(Line::Greeting, &[]);
                     println!("{}", printable(&greeting));
                     let _ = say_tx.try_send(greeting);
+                }
+                Some(Heard::Woke) => {
+                    let line = replies.line(Line::Wake, &[]);
+                    println!("{}", printable(&line));
+                    let _ = say_tx.try_send(line);
                 }
                 Some(Heard::Text(text)) => {
                     println!("> {}", printable(&text));
@@ -108,10 +126,12 @@ fn show(reply: &Reply) {
     }
 }
 
-/// Mic, VAD, recognition and speech, until `say` is closed or the receiver is gone.
+/// Mic, wake word, VAD, recognition and speech, until `say` is closed or the receiver is
+/// gone.
 fn voice_loop(
     models: &Path,
     device: Option<&str>,
+    wake: &[String],
     paused: &AtomicBool,
     heard: &async_mpsc::Sender<Heard>,
     say: &Receiver<String>,
@@ -120,6 +140,7 @@ fn voice_loop(
     let vad = Silero::new(&models.join(VAD_MODEL), &settings)?;
     let mut segmenter = Segmenter::new(vad, &settings);
     let recognizer = Recognizer::new(&models.join(STT_MODEL))?;
+    let mut spotter = Spotter::new(&models.join(KWS_MODEL), wake)?;
     let mut speaker = Speaker::new()?;
     let mic = Mic::open(device)?;
     if heard
@@ -130,6 +151,9 @@ fn voice_loop(
     }
 
     let mut transcript = None;
+    let mut awake_until: Option<Instant> = None;
+    // The wake word was heard in the current utterance.
+    let mut woke = false;
     loop {
         match say.try_recv() {
             Ok(text) => speaker.say(&text)?,
@@ -139,10 +163,33 @@ fn voice_loop(
         let Some(chunk) = mic.recv(Duration::from_millis(50))? else {
             continue;
         };
-        // Half duplex: neither paused audio nor the assistant's own voice is heard.
-        if paused.load(Ordering::Relaxed) || speaker.is_speaking() {
+        if paused.load(Ordering::Relaxed) {
             transcript = None;
             continue;
+        }
+        let keyword = spotter.push(&chunk);
+        let now = Instant::now();
+        let awake = awake_until.is_some_and(|until| until > now);
+        // Half duplex: only keywords are heard while the assistant speaks.
+        if speaker.is_speaking() {
+            if keyword.is_some() {
+                speaker.stop()?;
+            }
+            if awake || keyword == Some(Keyword::Wake) {
+                awake_until = Some(now + AWAKE);
+            }
+            transcript = None;
+            continue;
+        }
+        if keyword == Some(Keyword::Wake) {
+            awake_until = Some(now + AWAKE);
+            woke = true;
+            // Recognition restarts after the wake word, so the text is the command alone.
+            // shortcut: audio between the wake word's end and its detection is dropped, a
+            // few tens of ms; upgrade to the spotter's timestamps if first words go missing.
+            if segmenter.is_speaking() {
+                transcript = Some(recognizer.start());
+            }
         }
         let mut gone = false;
         segmenter.push(&chunk, |event| match event {
@@ -154,7 +201,17 @@ fn voice_loop(
             }
             Event::End => {
                 let text = transcript.take().map(|t| t.finish()).unwrap_or_default();
-                if !text.is_empty() && heard.blocking_send(Heard::Text(text)).is_err() {
+                let addressed = awake_until.is_some_and(|until| until > Instant::now());
+                let message = if !text.is_empty() && addressed {
+                    awake_until = Some(Instant::now() + AWAKE);
+                    Some(Heard::Text(text))
+                } else if woke {
+                    Some(Heard::Woke)
+                } else {
+                    None
+                };
+                woke = false;
+                if message.is_some_and(|m| heard.blocking_send(m).is_err()) {
                     gone = true;
                 }
             }

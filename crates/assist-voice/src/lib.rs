@@ -1,5 +1,5 @@
 //! Voice (PLAN.md Phase 2): microphone capture, voice activity detection, utterance
-//! segmentation, streaming speech to text and spoken replies through the OS voice.
+//! segmentation, wake word, streaming speech to text and spoken replies through the OS voice.
 //!
 //! Audio never reaches the async runtime: [`Mic`] reads on its own thread and hands out
 //! 16 kHz mono chunks; [`Segmenter`] turns them into [`Event`]s on the caller's thread.
@@ -14,6 +14,7 @@ mod speak;
 mod speak;
 mod stt;
 mod vad;
+mod wake;
 
 use std::path::PathBuf;
 
@@ -22,6 +23,7 @@ pub use segment::{Event, Segmenter, PRE_ROLL};
 pub use speak::Speaker;
 pub use stt::{Recognizer, Transcript};
 pub use vad::{Detector, Silero, VadSettings};
+pub use wake::{Keyword, Spotter};
 
 /// Sample rate of everything this crate hands out, Hz.
 pub const RATE: u32 = 16_000;
@@ -33,6 +35,9 @@ pub const VAD_MODEL: &str = "silero_vad.onnx";
 /// accurate in the Phase 2 spike. Its licence is unclear, so it is downloaded by the user,
 /// never bundled (PLAN.md section 12).
 pub const STT_MODEL: &str = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06";
+
+/// The keyword spotting model directory inside the models directory (Apache-2.0).
+pub const KWS_MODEL: &str = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01";
 
 /// Why voice input could not start or stopped.
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +60,9 @@ pub enum VoiceError {
     /// The OS voice failed or is missing.
     #[error("speech output: {0}")]
     Speech(String),
+    /// None of the wake phrases can be spelled with the keyword model's pieces.
+    #[error("cannot listen for the wake word {0:?}; use plain letters")]
+    Wake(String),
     /// The speech library could not create a component (bad model file, out of memory).
     #[error("could not create the {0}")]
     Engine(&'static str),

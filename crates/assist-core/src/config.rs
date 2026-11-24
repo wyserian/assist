@@ -69,6 +69,23 @@ pub struct PersonaConfig {
     pub name: String,
     /// How the assistant addresses you; empty for not at all.
     pub address: String,
+    /// The wake phrase; empty for "hey <name>" or "okay <name>". A longer word such as
+    /// "bumblebee" helps when a short name triggers by mistake.
+    pub wake_word: String,
+}
+
+impl PersonaConfig {
+    /// The phrases that wake the assistant.
+    pub fn wake_phrases(&self) -> Vec<String> {
+        if self.wake_word.trim().is_empty() {
+            ["hey", "okay", "ok"]
+                .iter()
+                .map(|greeting| format!("{greeting} {}", self.name))
+                .collect()
+        } else {
+            vec![self.wake_word.trim().to_owned()]
+        }
+    }
 }
 
 impl Default for PersonaConfig {
@@ -76,6 +93,7 @@ impl Default for PersonaConfig {
         Self {
             name: "Bee".to_owned(),
             address: "Prime".to_owned(),
+            wake_word: String::new(),
         }
     }
 }
@@ -397,6 +415,27 @@ pub(crate) fn location(src: &str, err: &toml::de::Error) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wake_phrases_follow_the_name_unless_set() {
+        let config = Config::from_toml(
+            "[persona]
+name = \"Bee\"
+",
+        )
+        .unwrap();
+        assert_eq!(
+            config.persona.wake_phrases(),
+            ["hey Bee", "okay Bee", "ok Bee"]
+        );
+        let config = Config::from_toml(
+            "[persona]
+wake_word = \" bumblebee \"
+",
+        )
+        .unwrap();
+        assert_eq!(config.persona.wake_phrases(), ["bumblebee"]);
+    }
 
     #[test]
     fn empty_config_is_valid() {

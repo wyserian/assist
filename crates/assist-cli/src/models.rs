@@ -8,15 +8,17 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use assist_core::private_fs::create_dir;
-use assist_voice::{STT_MODEL, VAD_MODEL};
+use assist_voice::{KWS_MODEL, STT_MODEL, VAD_MODEL};
 use sha2::{Digest, Sha256};
 
-const RELEASE: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models";
+const RELEASES: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download";
 
 /// A file from the sherpa-onnx release page, checked against its published sha256.
 struct Model {
     /// What exists in the models directory once it is installed.
     installed: &'static str,
+    /// Release tag on the sherpa-onnx release page.
+    release: &'static str,
     /// File name on the release page.
     file: &'static str,
     sha256: &'static str,
@@ -24,9 +26,10 @@ struct Model {
     licence: &'static str,
 }
 
-const MODELS: [Model; 2] = [
+const MODELS: [Model; 3] = [
     Model {
         installed: VAD_MODEL,
+        release: "asr-models",
         file: "silero_vad.onnx",
         sha256: "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
         size_mb: 1,
@@ -34,10 +37,20 @@ const MODELS: [Model; 2] = [
     },
     Model {
         installed: STT_MODEL,
+        release: "asr-models",
         file: "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06.tar.bz2",
         sha256: "c8676e5ff9ac2a85296e53ee0fd4d5fb1db6770e7a7647166eeafe349ade6834",
         size_mb: 55,
         licence: "unclear, see https://huggingface.co/Banafo/Kroko-ASR (personal use)",
+    },
+    Model {
+        installed: KWS_MODEL,
+        release: "kws-models",
+        file: "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2",
+        // The release page publishes no digest; this is the file as first downloaded.
+        sha256: "f170013b4716e41b62b9bfd809687c207cef798ef9bc6534d524e17af9b6561a",
+        size_mb: 18,
+        licence: "Apache-2.0",
     },
 ];
 
@@ -55,7 +68,7 @@ pub async fn ensure(data: &Path) -> Result<PathBuf> {
     for m in &missing {
         println!("  {} ({} MB, licence: {})", m.file, m.size_mb, m.licence);
     }
-    println!("from {RELEASE}");
+    println!("from {RELEASES}");
     if !io::stdin().is_terminal() {
         bail!("run assist listen in a terminal once to approve the download");
     }
@@ -74,7 +87,7 @@ pub async fn ensure(data: &Path) -> Result<PathBuf> {
 
 fn install(dir: &Path, model: &Model) -> Result<()> {
     let download = dir.join(format!("{}.part", model.file));
-    let url = format!("{RELEASE}/{}", model.file);
+    let url = format!("{RELEASES}/{}/{}", model.release, model.file);
     // Connection resets on large release downloads are common: retry and resume the
     // partial file. The sha256 check below still guards what ends up installed.
     let status = Command::new("curl")

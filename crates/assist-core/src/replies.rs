@@ -13,6 +13,8 @@ const DEFAULT_EN: &str = include_str!("../../../config/phrases/en/replies.toml")
 pub enum Line {
     /// When a voice client starts listening.
     Greeting,
+    /// The wake word alone: the assistant waits for the command.
+    Wake,
     /// Input matched nothing.
     NotUnderstood,
     /// Unmatched input offered to the shell; `{text}`.
@@ -51,8 +53,9 @@ pub enum Line {
 
 impl Line {
     /// Every line, for validation.
-    pub const ALL: [Line; 18] = [
+    pub const ALL: [Line; 19] = [
         Line::Greeting,
+        Line::Wake,
         Line::NotUnderstood,
         Line::OfferShell,
         Line::Expired,
@@ -76,6 +79,7 @@ impl Line {
     pub fn key(self) -> &'static str {
         match self {
             Line::Greeting => "greeting",
+            Line::Wake => "wake",
             Line::NotUnderstood => "not_understood",
             Line::OfferShell => "offer_shell",
             Line::Expired => "expired",

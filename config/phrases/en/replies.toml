@@ -4,6 +4,7 @@
 # asks to confirm is in its phrase file (`reply`, `confirm`).
 
 greeting = "Hello {address}. {name} is listening."
+wake = "Yes, {address}?"
 not_understood = "Sorry {address}, please say that again."
 offer_shell = "I don't know that command. Run \"{text}\" in the shell?"
 expired = "That question expired."

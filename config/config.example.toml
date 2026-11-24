@@ -43,6 +43,7 @@ shell = { owner_remote = "deny" }
 [persona]
 name = "Bee"
 address = "Prime"
+wake_word = ""          # "" for "hey Bee" / "okay Bee"; e.g. "bumblebee" if Bee wakes by mistake
 
 # Reword any reply; keys and defaults are in config/phrases/en/replies.toml.
 [replies]
