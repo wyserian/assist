@@ -31,6 +31,35 @@ pub const CLIENTS_REVOKE: &str = "clients.revoke";
 pub const AUTH_OTP: &str = "auth.otp";
 /// The newest audit records. Params: [`AuditPage`]. Result: `Vec<AuditEntry>`, oldest first.
 pub const AUDIT_TAIL: &str = "audit.tail";
+/// Questions clients are waiting on. Result: `Vec<Waiting>`.
+pub const DIALOGS_PENDING: &str = "dialogs.pending";
+/// Answers another client's question as that client. Params: [`DialogAnswer`]. Result:
+/// [`crate::Reply`]; the asking client gets the same reply and follows its jobs.
+pub const DIALOGS_ANSWER: &str = "dialogs.answer";
+
+/// A question a client is waiting on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Waiting {
+    /// Client connection id.
+    pub client: u64,
+    /// `cli` or `web`.
+    pub kind: String,
+    /// Program name from its hello.
+    pub program: String,
+    /// The question.
+    pub question: String,
+    /// When it was asked, Unix ms.
+    pub asked: u64,
+}
+
+/// An answer to another client's question.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DialogAnswer {
+    /// Client connection id.
+    pub client: u64,
+    /// The answer, e.g. `yes`.
+    pub text: String,
+}
 
 /// How many audit records to return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

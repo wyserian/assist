@@ -34,6 +34,8 @@ pub async fn run(paths: &Paths, text: &str) -> Result<ExitCode> {
         if !io::stdin().is_terminal() {
             bail!("the assistant asked a question; run this in a terminal to answer it");
         }
+        // shortcut: an answer given in the dashboard is seen here only after the next line
+        // typed in the terminal; race stdin with pushed replies if that becomes common.
         let answer = read_line("> ").await?;
         reply = client
             .say(if answer.is_empty() { "cancel" } else { &answer })

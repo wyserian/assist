@@ -428,6 +428,50 @@ async fn secrets_are_write_only_over_the_wire() {
 }
 
 #[tokio::test]
+async fn another_client_answers_a_waiting_question() {
+    let daemon = start("waiting").await;
+    let mut asker = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    let mut dashboard = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+
+    let text = Utterance {
+        text: "make me a sandwich".to_owned(),
+    };
+    send(&mut asker, Kind::Utterance, text).await;
+    let reply: Reply = recv(&mut asker).await.unwrap().body().unwrap();
+    assert!(reply.waiting);
+
+    let waiting: Vec<rpc::Waiting> = call(&mut dashboard, rpc::DIALOGS_PENDING, ()).await;
+    assert_eq!(waiting.len(), 1);
+    assert!(waiting[0]
+        .question
+        .contains("Run \"make me a sandwich\" in the shell?"));
+
+    let answer = rpc::DialogAnswer {
+        client: waiting[0].client,
+        text: "yes".to_owned(),
+    };
+    let answered: Reply = call(&mut dashboard, rpc::DIALOGS_ANSWER, answer.clone()).await;
+    assert_eq!(answered.jobs.len(), 1);
+    assert!(!answered.waiting);
+
+    // The asker gets the same reply and follows the job.
+    let pushed: Reply = recv(&mut asker).await.unwrap().body().unwrap();
+    assert_eq!(pushed, answered);
+    let update: JobUpdate = loop {
+        let message = recv(&mut asker).await.unwrap();
+        if let Ok(JobUpdate::Output { id, stream, text }) = message.body() {
+            break JobUpdate::Output { id, stream, text };
+        }
+    };
+    assert!(matches!(update, JobUpdate::Output { ref text, .. } if text == "make me a sandwich"));
+
+    let none: Vec<rpc::Waiting> = call(&mut dashboard, rpc::DIALOGS_PENDING, ()).await;
+    assert!(none.is_empty());
+    let again = call_raw(&mut dashboard, rpc::DIALOGS_ANSWER, answer).await;
+    assert_eq!(again.error.unwrap().code, "not_found");
+}
+
+#[tokio::test]
 async fn revoked_clients_are_disconnected() {
     let daemon = start("revoke").await;
     let mut admin = connect(daemon.port, &bearer(&daemon)).await.unwrap();

@@ -16,8 +16,8 @@ use assist_core::dialog::Engine;
 use assist_core::scheduler::Scheduler;
 use assist_core::secrets::Secrets;
 use assist_core::store::Store;
-use assist_proto::rpc::{ClientEntry, Otp};
-use assist_proto::MAX_FRAME;
+use assist_proto::rpc::{ClientEntry, Otp, Waiting};
+use assist_proto::{Reply, MAX_FRAME};
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Request, State};
 use axum::http::header::{
@@ -30,6 +30,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use tokio::net::TcpListener;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 mod auth;
@@ -121,7 +122,20 @@ struct Client {
     entry: ClientEntry,
     cancel: CancellationToken,
     session: Option<String>,
+    /// Answers typed for this client elsewhere (the dashboard's Waiting tab).
+    inbox: mpsc::Sender<Answer>,
+    /// The question this client's dialog is waiting on, and when it was asked.
+    question: Option<(String, u64)>,
 }
+
+/// An answer to a client's question, given elsewhere; the client sends back its reply.
+pub(crate) struct Answer {
+    pub(crate) text: String,
+    pub(crate) reply: oneshot::Sender<Reply>,
+}
+
+/// Answers queued per client before it has handled them.
+const INBOX: usize = 8;
 
 impl std::ops::Deref for AppState {
     type Target = Shared;
@@ -135,8 +149,12 @@ impl Shared {
         self.clients.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Registers a connection; its token is cancelled on revoke or shutdown.
-    pub(crate) fn connect(&self, credential: &Credential) -> (u64, CancellationToken) {
+    /// Registers a connection; its token is cancelled on revoke or shutdown, and answers
+    /// given for it elsewhere arrive on the receiver.
+    pub(crate) fn connect(
+        &self,
+        credential: &Credential,
+    ) -> (u64, CancellationToken, mpsc::Receiver<Answer>) {
         let id = self.next_client.fetch_add(1, Ordering::Relaxed);
         let cancel = self.stop.child_token();
         let (kind, session) = match credential {
@@ -149,15 +167,52 @@ impl Shared {
             client: String::new(),
             connected: assist_proto::now_ms(),
         };
+        let (inbox, answers) = mpsc::channel(INBOX);
         self.clients().insert(
             id,
             Client {
                 entry,
                 cancel: cancel.clone(),
                 session,
+                inbox,
+                question: None,
             },
         );
-        (id, cancel)
+        (id, cancel, answers)
+    }
+
+    /// Records the question a client waits on (`None` when it waits on nothing).
+    pub(crate) fn set_question(&self, id: u64, question: Option<String>) {
+        if let Some(client) = self.clients().get_mut(&id) {
+            client.question = question.map(|q| (q, assist_proto::now_ms()));
+        }
+    }
+
+    /// Every client's open question.
+    pub(crate) fn waiting(&self) -> Vec<Waiting> {
+        self.clients()
+            .values()
+            .filter_map(|client| {
+                let (question, asked) = client.question.clone()?;
+                Some(Waiting {
+                    client: client.entry.id,
+                    kind: client.entry.kind.clone(),
+                    program: client.entry.client.clone(),
+                    question,
+                    asked,
+                })
+            })
+            .collect()
+    }
+
+    /// Hands `text` to client `id` as the answer to its question; `None` if it has none or
+    /// its inbox is full.
+    pub(crate) fn answer(&self, id: u64, text: String) -> Option<oneshot::Receiver<Reply>> {
+        let clients = self.clients();
+        let client = clients.get(&id).filter(|c| c.question.is_some())?;
+        let (reply, receive) = oneshot::channel();
+        client.inbox.try_send(Answer { text, reply }).ok()?;
+        Some(receive)
     }
 
     pub(crate) fn name_client(&self, id: u64, name: &str) {

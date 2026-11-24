@@ -33,7 +33,7 @@ pub(crate) struct Conn {
 }
 
 pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Credential) {
-    let (id, cancel) = state.connect(&credential);
+    let (id, cancel, mut answers) = state.connect(&credential);
     let source = match credential {
         Credential::Token => "cli",
         Credential::Session(_) => "web",
@@ -66,6 +66,13 @@ pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Cred
                 Err(RecvError::Lagged(_)) => Vec::new(),
                 Err(RecvError::Closed) => break,
             },
+            Some(answer) = answers.recv() => {
+                // Answered elsewhere: handled as if this client typed it, so its jobs run
+                // in its directory and it follows them.
+                let reply = conn.converse(&answer.text);
+                let _ = answer.reply.send(reply.clone());
+                vec![Envelope::new(Kind::Reply, HUB, &conn.peer, reply)]
+            }
         };
         for envelope in outgoing {
             if socket
@@ -135,12 +142,22 @@ impl Conn {
     }
 
     fn utterance(&mut self, message: &Envelope, text: &str) -> Envelope {
+        let reply = self.converse(text);
+        message.answer(Kind::Reply, HUB, reply)
+    }
+
+    /// Runs `text` through this client's dialog, starts the resulting jobs and publishes
+    /// the question it now waits on, if any.
+    pub(crate) fn converse(&mut self, text: &str) -> Reply {
         let reply = self.dialog.handle(&self.principal, text, Instant::now());
+        let waiting = self.dialog.is_waiting();
+        let question = waiting.then(|| reply.say.last().cloned()).flatten();
+        self.state.set_question(self.id, question);
         let scheduler = &self.state.services.scheduler;
         let mut answer = Reply {
             say: reply.say,
             jobs: Vec::new(),
-            waiting: self.dialog.is_waiting(),
+            waiting,
         };
         for plan in reply.run {
             let title = self.state.services.engine.readback(&plan);
@@ -154,7 +171,7 @@ impl Conn {
                 Err(err) => answer.say.push(err.to_string()),
             }
         }
-        message.answer(Kind::Reply, HUB, answer)
+        answer
     }
 
     /// The update to send for a scheduler event, if this connection wants it.

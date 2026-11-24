@@ -3,7 +3,8 @@
 use assist_core::policy::Trust;
 use assist_core::scheduler::JobInfo;
 use assist_proto::rpc::{
-    self, AuditPage, ClientRef, Explain, History, JobRef, Otp, SecretEntry, SecretName, SecretSet,
+    self, AuditPage, ClientRef, DialogAnswer, Explain, History, JobRef, Otp, SecretEntry,
+    SecretName, SecretSet,
 };
 use assist_proto::{Rpc, RpcResult};
 use serde::de::DeserializeOwned;
@@ -16,6 +17,8 @@ use crate::Credential;
 const TAIL_BYTES: u64 = 64 * 1024;
 /// Most jobs returned by one `jobs.history` call.
 const MAX_HISTORY: usize = 500;
+/// How long `dialogs.answer` waits for the other client to take the answer.
+const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) async fn call(conn: &mut Conn, call: Rpc) -> RpcResult {
     match dispatch(conn, &call.method, call.params).await {
@@ -98,6 +101,23 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
                 .ok_or_else(|| RpcResult::err("unavailable", "this daemon has no audit log"))?;
             let limit = page.limit.unwrap_or(100).min(MAX_HISTORY);
             RpcResult::ok(blocking(move || audit.tail(limit)).await?)
+        }
+        rpc::DIALOGS_PENDING => RpcResult::ok(conn.state.waiting()),
+        rpc::DIALOGS_ANSWER => {
+            // A local user on the dashboard may answer any client's question (PLAN.md 3.5).
+            require_local(conn)?;
+            let answer: DialogAnswer = parse(params)?;
+            if answer.client == conn.id {
+                return Ok(RpcResult::ok(conn.converse(&answer.text)));
+            }
+            let reply = conn
+                .state
+                .answer(answer.client, answer.text)
+                .ok_or_else(|| RpcResult::err("not_found", "that client is not waiting"))?;
+            match tokio::time::timeout(ANSWER_WAIT, reply).await {
+                Ok(Ok(reply)) => RpcResult::ok(reply),
+                _ => RpcResult::err("failed", "the client did not take the answer"),
+            }
         }
         rpc::AUTH_OTP => {
             // Only the token holder can let a browser in.

@@ -186,9 +186,53 @@ function refreshSoon() {
 }
 
 function refresh(tab) {
-  const views = { jobs: loadJobs, secrets: loadSecrets, audit: loadAudit, clients: loadClients };
+  const views = {
+    jobs: loadJobs,
+    waiting: loadWaiting,
+    secrets: loadSecrets,
+    audit: loadAudit,
+    clients: loadClients,
+  };
   if (views[tab]) views[tab]().catch((err) => setStatus(err.message));
 }
+
+// --- waiting ---
+
+async function loadWaiting() {
+  const questions = await rpc("dialogs.pending");
+  const body = $("waiting-body");
+  body.replaceChildren();
+  for (const item of questions) {
+    const answer = async (text) => {
+      try {
+        const reply = await rpc("dialogs.answer", { client: item.client, text });
+        const started = (reply.jobs || []).map((job) => `#${job.id}`).join(", ");
+        setStatus(started ? `Answered; started ${started}` : "Answered");
+      } catch (err) {
+        setStatus(err.message);
+      }
+      loadWaiting();
+    };
+    const form = document.createElement("form");
+    const input = el("input");
+    input.maxLength = 8000;
+    input.setAttribute("aria-label", "Answer");
+    form.append(input, el("button", "Send"));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (input.value.trim()) answer(input.value.trim());
+    });
+    const buttons = document.createElement("span");
+    buttons.append(button("Yes", () => answer("yes")), " ", button("No", () => answer("no")), form);
+    body.append(row([`${item.kind} ${item.program} (${item.client})`, item.question, time(item.asked), buttons]));
+  }
+  if (!questions.length) body.append(row(["Nothing is waiting."]));
+}
+
+// Questions come and go on other clients; poll while the tab is open.
+setInterval(() => {
+  if (currentTab() === "waiting" && socket && socket.readyState === WebSocket.OPEN) refresh("waiting");
+}, 3000);
 
 // --- jobs ---
 
