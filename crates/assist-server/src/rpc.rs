@@ -3,7 +3,7 @@
 use assist_core::policy::Trust;
 use assist_core::scheduler::JobInfo;
 use assist_proto::rpc::{
-    self, ClientRef, Explain, History, JobRef, Otp, SecretEntry, SecretName, SecretSet,
+    self, AuditPage, ClientRef, Explain, History, JobRef, Otp, SecretEntry, SecretName, SecretSet,
 };
 use assist_proto::{Rpc, RpcResult};
 use serde::de::DeserializeOwned;
@@ -89,6 +89,15 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
             require_local(conn)?;
             let client: ClientRef = parse(params)?;
             RpcResult::ok(conn.state.revoke(client.id))
+        }
+        rpc::AUDIT_TAIL => {
+            let page: AuditPage = parse(params)?;
+            let audit = services
+                .audit
+                .clone()
+                .ok_or_else(|| RpcResult::err("unavailable", "this daemon has no audit log"))?;
+            let limit = page.limit.unwrap_or(100).min(MAX_HISTORY);
+            RpcResult::ok(blocking(move || audit.tail(limit)).await?)
         }
         rpc::AUTH_OTP => {
             // Only the token holder can let a browser in.

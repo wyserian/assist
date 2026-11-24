@@ -29,6 +29,38 @@ pub const CLIENTS_LIST: &str = "clients.list";
 pub const CLIENTS_REVOKE: &str = "clients.revoke";
 /// A one-time code for signing a browser in (token clients only). Result: [`Otp`].
 pub const AUTH_OTP: &str = "auth.otp";
+/// The newest audit records. Params: [`AuditPage`]. Result: `Vec<AuditEntry>`, oldest first.
+pub const AUDIT_TAIL: &str = "audit.tail";
+
+/// How many audit records to return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AuditPage {
+    /// At most this many (default 100).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// One audit record as clients see it (without the hash chain fields).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditEntry {
+    /// Unix ms.
+    pub ts: u64,
+    /// `submitted`, `running`, `done`, `failed`, ...
+    pub event: String,
+    /// Job id.
+    pub job: u64,
+    /// Command name.
+    pub command: String,
+    /// The resolved action, secrets redacted.
+    pub title: String,
+    /// Adapter, e.g. `cli`.
+    pub source: String,
+    /// Trust level.
+    pub trust: String,
+    /// Error message for failed jobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
 
 /// A job id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

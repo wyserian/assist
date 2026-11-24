@@ -22,6 +22,8 @@ const MAX_PENDING: usize = 10_000;
 /// A connection to the daemon.
 pub struct Client {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    /// `host:port` of the daemon.
+    addr: String,
     /// Messages that arrived while waiting for something else.
     pending: VecDeque<Envelope>,
 }
@@ -48,6 +50,7 @@ impl Client {
         };
         let mut client = Self {
             ws,
+            addr: addr.to_owned(),
             pending: VecDeque::new(),
         };
         let cwd = std::env::current_dir()
@@ -61,6 +64,11 @@ impl Client {
         let sent = client.send(Kind::Hello, hello).await?;
         client.answer(sent).await?;
         Ok(client)
+    }
+
+    /// The daemon's `host:port`.
+    pub fn addr(&self) -> &str {
+        &self.addr
     }
 
     /// Sends text to this connection's conversation.

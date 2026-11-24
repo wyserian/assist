@@ -114,6 +114,7 @@ dependencies = [
  "directories",
  "futures-util",
  "keyring",
+ "open",
  "serde",
  "serde_json",
  "tokio",

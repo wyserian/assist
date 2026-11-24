@@ -6,19 +6,25 @@
 //! shortcut: each month file starts its own chain, so deleting a whole month file is not
 //! detected; anchor each file to the previous one when logs are exported or synced.
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
+pub use assist_proto::rpc::AuditEntry;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::private_fs;
+use crate::store::tail_lines;
 
 /// `prev` of the first line in a file.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// Bytes read from the end of each month file by [`Audit::tail`].
+const TAIL_BYTES: u64 = 256 * 1024;
 
 /// One audited event.
 #[derive(Debug, Clone, Serialize)]
@@ -114,6 +120,29 @@ impl Audit {
     /// The last write error, if any write failed.
     pub fn last_error(&self) -> Option<String> {
         self.lock().last_error.clone()
+    }
+
+    /// The last `limit` records from the newest month files, oldest first. Blocking.
+    pub fn tail(&self, limit: usize) -> io::Result<Vec<AuditEntry>> {
+        let dir = self.lock().dir.clone();
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+            .collect();
+        // YYYY-MM names sort by time.
+        files.sort();
+        let mut entries = VecDeque::new();
+        for path in files.iter().rev() {
+            for line in tail_lines(path, TAIL_BYTES)?.iter().rev() {
+                if entries.len() == limit {
+                    return Ok(entries.into());
+                }
+                if let Ok(entry) = serde_json::from_str(line) {
+                    entries.push_front(entry);
+                }
+            }
+        }
+        Ok(entries.into())
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Writer> {
@@ -240,6 +269,11 @@ mod tests {
         let reopened = Audit::open(&dir).unwrap();
         reopened.append(&record(2, "submitted")).unwrap();
         assert_eq!(verify(&dir.join("2023-11.jsonl")).unwrap(), 3);
+
+        let tail = reopened.tail(2).unwrap();
+        let events: Vec<_> = tail.iter().map(|e| (e.job, e.event.as_str())).collect();
+        assert_eq!(events, [(1, "done"), (2, "submitted")]);
+        assert_eq!(reopened.tail(10).unwrap().len(), 3);
         fs::remove_dir_all(&dir).unwrap();
     }
 

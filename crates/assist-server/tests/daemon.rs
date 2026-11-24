@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use assist_core::action::{Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest};
+use assist_core::audit::Audit;
 use assist_core::config::Config;
 use assist_core::dialog::{Engine, SHELL};
 use assist_core::phrases::PhraseSet;
@@ -16,7 +17,9 @@ use assist_core::policy::Capability;
 use assist_core::scheduler::{Persistence, Scheduler};
 use assist_core::secrets::{SecretError, SecretStore, Secrets};
 use assist_core::store::Store;
-use assist_proto::rpc::{self, Explanation, JobRef, Otp, SecretEntry, SecretName, SecretSet};
+use assist_proto::rpc::{
+    self, AuditEntry, Explanation, JobRef, Otp, SecretEntry, SecretName, SecretSet,
+};
 use assist_proto::{
     Envelope, Hello, JobState, JobSummary, JobUpdate, Kind, Reply, Rpc, RpcResult, Utterance,
 };
@@ -99,13 +102,14 @@ async fn start(name: &str) -> Daemon {
     let config = Arc::new(Config::from_toml("").unwrap());
     let (store, _) = Store::open(&dir, &config.jobs).unwrap();
     let secrets = Arc::new(Secrets::open(Box::new(Memory::default()), &dir).unwrap());
+    let audit = Audit::open(&dir.join("audit")).unwrap();
     let scheduler = Scheduler::new(
         vec![Arc::new(Echo)],
         Arc::clone(&config),
         Persistence {
+            audit: Some(audit.clone()),
             store: Some(store.clone()),
             redactor: Some(secrets.redactor()),
-            ..Persistence::default()
         },
     );
     let engine = Arc::new(
@@ -125,6 +129,7 @@ async fn start(name: &str) -> Daemon {
         scheduler,
         engine,
         store,
+        audit: Some(audit),
         secrets: Some(secrets),
         default_cwd: std::env::temp_dir(),
         data_dir: dir.clone(),
@@ -317,6 +322,48 @@ async fn token_client_runs_and_inspects_jobs() {
     assert_eq!(explained.unwrap().decision, "allow");
     let unknown = call_raw(&mut ws, "jobs.fly", ()).await;
     assert_eq!(unknown.error.unwrap().code, "unknown_method");
+
+    // Audit records are written off the runtime; give them a moment.
+    let mut events = Vec::new();
+    for _ in 0..100 {
+        let entries: Vec<AuditEntry> =
+            call(&mut ws, rpc::AUDIT_TAIL, rpc::AuditPage { limit: Some(10) }).await;
+        events = entries.into_iter().map(|e| e.event).collect();
+        if events.len() >= 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(events, ["submitted", "running", "done"]);
+}
+
+/// A minimal HTTP/1.1 GET; returns the whole response.
+async fn get(port: u16, path: &str) -> String {
+    let request =
+        format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    response
+}
+
+#[tokio::test]
+async fn serves_the_page_with_strict_headers() {
+    let daemon = start("page").await;
+    let page = get(daemon.port, "/").await;
+    let lower = page.to_ascii_lowercase();
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+    assert!(lower.contains("content-type: text/html"), "{page}");
+    assert!(
+        lower.contains("content-security-policy: default-src 'self'"),
+        "{page}"
+    );
+    assert!(lower.contains("x-content-type-options: nosniff"), "{page}");
+    assert!(page.contains("<title>assist</title>"));
+    let script = get(daemon.port, "/app.js").await.to_ascii_lowercase();
+    assert!(script.contains("content-type: text/javascript"));
+    assert!(get(daemon.port, "/nope").await.starts_with("HTTP/1.1 404"));
 }
 
 #[tokio::test]

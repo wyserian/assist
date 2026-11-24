@@ -209,24 +209,29 @@ impl Store {
 
     /// The last lines of a job's log, at most `max_bytes`. Empty if there is no log. Blocking.
     pub fn log_tail(&self, id: JobId, max_bytes: u64) -> io::Result<Vec<String>> {
-        let mut file = match File::open(log_path(&self.logs, id)) {
-            Ok(file) => file,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(err) => return Err(err),
-        };
-        let len = file.metadata()?.len();
-        let start = len.saturating_sub(max_bytes);
-        file.seek(SeekFrom::Start(start))?;
-        let mut text = Vec::new();
-        file.read_to_end(&mut text)?;
-        let text = String::from_utf8_lossy(&text);
-        let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
-        if start > 0 && !lines.is_empty() {
-            // The first line is cut in the middle.
-            lines.remove(0);
-        }
-        Ok(lines)
+        tail_lines(&log_path(&self.logs, id), max_bytes)
     }
+}
+
+/// The whole lines in the last `max_bytes` of a file; empty if it does not exist. Blocking.
+pub(crate) fn tail_lines(path: &Path, max_bytes: u64) -> io::Result<Vec<String>> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err),
+    };
+    let len = file.metadata()?.len();
+    let start = len.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(start))?;
+    let mut text = Vec::new();
+    file.read_to_end(&mut text)?;
+    let text = String::from_utf8_lossy(&text);
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    if start > 0 && !lines.is_empty() {
+        // The first line is cut in the middle.
+        lines.remove(0);
+    }
+    Ok(lines)
 }
 
 /// One `jobs` row.

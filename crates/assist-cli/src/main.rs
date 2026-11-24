@@ -57,6 +57,12 @@ enum Command {
         #[arg(required = true, trailing_var_arg = true)]
         text: Vec<String>,
     },
+    /// Open the dashboard in the default browser, signed in.
+    Ui {
+        /// Print the one-time sign-in link instead of opening a browser.
+        #[arg(long)]
+        print: bool,
+    },
     /// Manage secrets (API keys). Values are never shown.
     #[command(subcommand)]
     Secret(SecretCommand),
@@ -96,6 +102,7 @@ fn main() -> Result<ExitCode> {
             Command::Stop { target } => commands::stop(&paths, &target).await?,
             Command::Log { id } => commands::log(&paths, id).await?,
             Command::Explain { text } => commands::explain(&paths, &text.join(" ")).await?,
+            Command::Ui { print } => commands::ui(&paths, print).await?,
             Command::Secret(SecretCommand::List) => commands::secret_list(&paths).await?,
             Command::Secret(SecretCommand::Set { name }) => {
                 commands::secret_set(&paths, &name).await?;

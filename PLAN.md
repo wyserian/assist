@@ -430,7 +430,7 @@ Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM plan
 | Concern | Choice |
 |---|---|
 | HTTP + WebSocket | `axum` (ws), `tokio-tungstenite` (client) |
-| Embedded UI | `rust-embed`; plain HTML/CSS/JS, no build step |
+| Embedded UI | `include_str!` of `web/` (no build step, no extra crate); plain HTML/CSS/JS |
 | CLI | `clap` |
 | MCP | `rmcp`: server, and client for plugins (Phase 7) |
 
@@ -958,6 +958,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-24 | Quality bar in CLAUDE.md: reusable, bounded, extensible, current-state comments, plain ASCII output (no AI-style typography), user-only data files, pinned CI actions, dependency re-audit before each push |
 | 2026-11-24 | Search engine configurable via `[search] url` (http/https with {query}); default DuckDuckGo |
 | 2026-11-24 | Secrets: OS keystore via `keyring` 4 (no age fallback until a machine needs it); metadata in `secrets.json`; values of 8+ bytes redacted from titles, output and audit; per-action grants arrive with the first action that uses a secret |
+| 2026-11-24 | Web UI files embedded with include_str! (three files; rust-embed not needed). Daemon address published in daemon.addr so [server] bind can use port 0. Waiting tab moved to the settings commit (needs dialogs shared across connections) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

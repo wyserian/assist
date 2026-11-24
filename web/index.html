@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>assist</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header>
+  <strong>assist</strong>
+  <nav id="tabs">
+    <button type="button" data-tab="chat" aria-pressed="true">Chat</button>
+    <button type="button" data-tab="jobs">Jobs</button>
+    <button type="button" data-tab="secrets">Secrets</button>
+    <button type="button" data-tab="commands">Commands</button>
+    <button type="button" data-tab="audit">Audit</button>
+    <button type="button" data-tab="clients">Clients</button>
+  </nav>
+  <span id="status" role="status">Connecting</span>
+  <button type="button" id="stop-all" class="danger">Stop all jobs</button>
+</header>
+
+<p id="signin" hidden>Not signed in. Run <code>assist ui</code> in a terminal to open this page signed in.</p>
+
+<main>
+  <section id="chat">
+    <div id="log" aria-live="polite"></div>
+    <form id="say">
+      <label for="say-text" class="hidden-label">Command</label>
+      <input id="say-text" autocomplete="off" maxlength="8000" placeholder="open firefox, run build, $ ls">
+      <button type="submit">Send</button>
+    </form>
+  </section>
+
+  <section id="jobs" hidden>
+    <p><button type="button" id="jobs-refresh">Refresh</button></p>
+    <table>
+      <thead><tr><th>Id</th><th>State</th><th>Lane</th><th>Source</th><th>Action</th><th></th></tr></thead>
+      <tbody id="jobs-body"></tbody>
+    </table>
+    <h2 id="job-log-title" hidden></h2>
+    <pre id="job-log" hidden></pre>
+  </section>
+
+  <section id="secrets" hidden>
+    <table>
+      <thead><tr><th>Name</th><th>Ends with</th><th>Set</th><th></th></tr></thead>
+      <tbody id="secrets-body"></tbody>
+    </table>
+    <form id="secret-form">
+      <h2>Add or replace</h2>
+      <label>Name <input id="secret-name" required pattern="[a-z0-9_-]{1,64}" autocomplete="off"></label>
+      <label>Value <input id="secret-value" type="password" required maxlength="16384" autocomplete="off"></label>
+      <button type="submit">Save</button>
+    </form>
+    <p id="secrets-note"></p>
+  </section>
+
+  <section id="commands" hidden>
+    <form id="explain-form">
+      <label>Sentence <input id="explain-text" autocomplete="off" maxlength="8000"></label>
+      <button type="submit">Explain</button>
+    </form>
+    <pre id="explain-out"></pre>
+  </section>
+
+  <section id="audit" hidden>
+    <p><button type="button" id="audit-refresh">Refresh</button></p>
+    <table>
+      <thead><tr><th>Time</th><th>Event</th><th>Job</th><th>Source</th><th>Action</th></tr></thead>
+      <tbody id="audit-body"></tbody>
+    </table>
+  </section>
+
+  <section id="clients" hidden>
+    <p><button type="button" id="clients-refresh">Refresh</button></p>
+    <table>
+      <thead><tr><th>Id</th><th>Kind</th><th>Program</th><th>Connected</th><th></th></tr></thead>
+      <tbody id="clients-body"></tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>

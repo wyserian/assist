@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use assist_core::audit::Audit;
 use assist_core::dialog::Engine;
 use assist_core::scheduler::Scheduler;
 use assist_core::secrets::Secrets;
@@ -20,7 +21,8 @@ use assist_proto::MAX_FRAME;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Request, State};
 use axum::http::header::{
-    CACHE_CONTROL, CONTENT_SECURITY_POLICY, REFERRER_POLICY, SET_COOKIE, X_CONTENT_TYPE_OPTIONS,
+    CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY, SET_COOKIE,
+    X_CONTENT_TYPE_OPTIONS,
 };
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
@@ -37,6 +39,10 @@ mod rpc;
 pub use auth::{load_or_create_token, Credential};
 use auth::{Auth, Refusal};
 
+const INDEX_HTML: &str = include_str!("../../../web/index.html");
+const APP_JS: &str = include_str!("../../../web/app.js");
+const STYLE_CSS: &str = include_str!("../../../web/style.css");
+
 const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; \
                    connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
@@ -48,6 +54,8 @@ pub struct Services {
     pub engine: Arc<Engine>,
     /// Job history.
     pub store: Store,
+    /// Audit log, for the dashboard.
+    pub audit: Option<Audit>,
     /// Secrets, if a keystore is available.
     pub secrets: Option<Arc<Secrets>>,
     /// Working directory for shell jobs of clients that do not send one.
@@ -74,7 +82,15 @@ pub async fn serve(
         stop: stop.clone(),
     }));
     let app = Router::new()
-        .route("/", get(index))
+        .route("/", get(|| page(INDEX_HTML, "text/html; charset=utf-8")))
+        .route(
+            "/app.js",
+            get(|| page(APP_JS, "text/javascript; charset=utf-8")),
+        )
+        .route(
+            "/style.css",
+            get(|| page(STYLE_CSS, "text/css; charset=utf-8")),
+        )
         .route("/ws", get(websocket))
         .route("/auth", post(sign_in))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
@@ -190,8 +206,10 @@ async fn guard(State(state): State<AppState>, request: Request, next: Next) -> R
     response
 }
 
-async fn index() -> &'static str {
-    "assist daemon. Open the dashboard with: assist ui\n"
+/// A file of the web UI. The page holds no data; everything comes over the authenticated
+/// WebSocket, so it is served without sign-in.
+async fn page(body: &'static str, content_type: &'static str) -> Response {
+    ([(CONTENT_TYPE, content_type)], body).into_response()
 }
 
 async fn websocket(

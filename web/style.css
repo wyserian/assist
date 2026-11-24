@@ -1,0 +1,111 @@
+:root {
+  color-scheme: light dark;
+  --fg: #1a1a1a;
+  --bg: #ffffff;
+  --muted: #666666;
+  --line: #d0d0d0;
+  --danger: #b00020;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6e6e6;
+    --bg: #161616;
+    --muted: #9a9a9a;
+    --line: #3a3a3a;
+    --danger: #ff6b6b;
+  }
+}
+
+body {
+  margin: 0;
+  font: 14px/1.4 system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+nav button[aria-pressed="true"] {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+#status {
+  color: var(--muted);
+  margin-left: auto;
+}
+
+main {
+  padding: 12px;
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+pre, #log, code {
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#log {
+  height: 60vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line);
+  padding: 8px;
+}
+
+#log .you { color: var(--muted); }
+#log .err { color: var(--danger); }
+
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+#say-text, #explain-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.hidden-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+#signin {
+  padding: 12px;
+  color: var(--danger);
+}

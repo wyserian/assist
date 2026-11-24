@@ -5,7 +5,9 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::process::ExitCode;
 
 use anyhow::{bail, Result};
-use assist_proto::rpc::{self, Explain, Explanation, JobRef, SecretEntry, SecretName, SecretSet};
+use assist_proto::rpc::{
+    self, Explain, Explanation, JobRef, Otp, SecretEntry, SecretName, SecretSet,
+};
 use assist_proto::{JobState, JobSummary, JobUpdate, Stream};
 
 use crate::client::Client;
@@ -128,6 +130,26 @@ pub async fn explain(paths: &Paths, text: &str) -> Result<()> {
     }
     println!("action:   {}", printable(&explanation.readback));
     println!("decision: {}", explanation.decision);
+    Ok(())
+}
+
+/// Opens the dashboard in the default browser, signed in with a one-time code; with `print`,
+/// prints the link instead.
+pub async fn ui(paths: &Paths, print: bool) -> Result<()> {
+    let mut client = Client::connect(paths.data()).await?;
+    let otp: Otp = client.call(rpc::AUTH_OTP, ()).await?;
+    let url = format!("http://{}/#otp={}", client.addr(), otp.code);
+    if print {
+        println!("{url}");
+        return Ok(());
+    }
+    let opened =
+        tokio::task::spawn_blocking(move || open::that_detached(&url).map_err(|_| url)).await?;
+    match opened {
+        Ok(()) => println!("Opened the dashboard in your browser."),
+        // The code works once, for a minute.
+        Err(url) => println!("Open this link within a minute: {url}"),
+    }
     Ok(())
 }
 

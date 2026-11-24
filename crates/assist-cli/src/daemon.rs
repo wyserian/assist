@@ -36,6 +36,7 @@ pub async fn run(paths: Paths) -> Result<()> {
         scheduler: assistant.scheduler.clone(),
         engine: assistant.engine.clone(),
         store: assistant.store.clone(),
+        audit: Some(assistant.audit.clone()),
         secrets: assistant.secrets.clone(),
         default_cwd: std::env::current_dir()?,
         data_dir: paths.data().clone(),
