@@ -32,3 +32,19 @@ fn transcribes_the_model_sample() {
         "{text}"
     );
 }
+
+#[test]
+#[ignore = "needs the Kroko and VAD models in spikes/voice/models"]
+fn transcribes_a_file_sentence_by_sentence() {
+    let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spikes/voice/models");
+    let samples = assist_voice::read_wav(&models.join(STT_MODEL).join("test_wavs/0.wav")).unwrap();
+    let recognizer = Recognizer::new(&models.join(STT_MODEL)).unwrap();
+    let lines =
+        assist_voice::transcribe(&samples, &models.join(assist_voice::VAD_MODEL), &recognizer)
+            .unwrap();
+    let text = lines.join(" ").to_lowercase();
+    assert!(
+        text.contains("ask not what your country can do for you"),
+        "{lines:?}"
+    );
+}

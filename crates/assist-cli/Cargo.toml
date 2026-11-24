@@ -15,7 +15,7 @@ path = "src/main.rs"
 [features]
 default = ["voice"]
 # assist listen: microphone, speech to text, spoken replies.
-voice = ["dep:assist-voice", "dep:sha2"]
+voice = ["dep:assist-voice", "dep:sha2", "assist-actions/transcribe"]
 
 [dependencies]
 anyhow.workspace = true

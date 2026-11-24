@@ -6,9 +6,6 @@
 
 use super::Kind;
 
-pub const FFMPEG: &str = "ffmpeg";
-pub const INSTALL: &str = "your package manager, e.g. apt install ffmpeg";
-
 /// The input arguments for `kind`.
 pub async fn input(kind: Kind) -> Result<Vec<String>, String> {
     let args: Vec<String> = match kind {

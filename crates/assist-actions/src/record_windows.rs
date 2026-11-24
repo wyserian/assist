@@ -2,9 +2,6 @@
 
 use super::Kind;
 
-pub const FFMPEG: &str = "ffmpeg.exe";
-pub const INSTALL: &str = "winget install ffmpeg";
-
 /// The input arguments for `kind`. DirectShow needs the microphone's exact name, so it asks
 /// ffmpeg for its devices.
 ///
@@ -17,7 +14,7 @@ pub async fn input(kind: Kind) -> Result<Vec<String>, String> {
             .map(|a| (*a).to_owned())
             .collect()),
         Kind::Audio => {
-            let output = tokio::process::Command::new(FFMPEG)
+            let output = tokio::process::Command::new(crate::process::FFMPEG)
                 .args([
                     "-hide_banner",
                     "-list_devices",

@@ -74,10 +74,10 @@ impl Action for Record {
         Box::pin(async move {
             let spec = Spec::parse(ctx.plan.slots.get("spec").map_or("", String::as_str))
                 .map_err(ActionError::new)?;
-            if !process::on_path(os::FFMPEG) {
+            if !process::on_path(process::FFMPEG) {
                 return Err(ActionError::new(format!(
                     "ffmpeg is not installed; install it ({}) and try again",
-                    os::INSTALL
+                    process::FFMPEG_INSTALL
                 )));
             }
             let path = match &spec.file {
@@ -107,7 +107,7 @@ impl Action for Record {
                     path.display()
                 )))
                 .await;
-            let mut command = Command::new(os::FFMPEG);
+            let mut command = Command::new(process::FFMPEG);
             command.args(&args);
             process::run(command, &ctx.cwd, &out).await
         })

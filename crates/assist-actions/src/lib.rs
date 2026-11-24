@@ -23,6 +23,8 @@ pub mod scripts;
 pub mod search;
 #[cfg(feature = "shell")]
 pub mod shell;
+#[cfg(feature = "transcribe")]
+pub mod transcribe;
 #[cfg(feature = "transforms")]
 pub mod transforms;
 
@@ -48,6 +50,8 @@ pub fn builtin() -> Vec<Arc<dyn Action>> {
     actions.extend(screen::all());
     #[cfg(feature = "record")]
     actions.extend(record::all());
+    #[cfg(feature = "transcribe")]
+    actions.extend(transcribe::all());
     actions
 }
 

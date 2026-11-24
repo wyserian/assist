@@ -6,6 +6,7 @@
 //! 16 kHz mono chunks; [`Segmenter`] turns them into [`Event`]s on the caller's thread.
 
 mod capture;
+mod file;
 mod segment;
 #[cfg(not(windows))]
 #[path = "speak_unix.rs"]
@@ -21,6 +22,7 @@ mod wake;
 use std::path::PathBuf;
 
 pub use capture::{input_devices, Mic};
+pub use file::{read_wav, transcribe, MAX_FILE_SECONDS};
 pub use segment::{Event, Segmenter, PRE_ROLL};
 pub use speak::Speaker;
 pub use speaker::{SpeakerModel, Voiceprint};
@@ -61,6 +63,9 @@ pub enum VoiceError {
     /// The device delivers samples in a format this crate does not convert.
     #[error("microphone sample format {0} is not supported")]
     Format(String),
+    /// An audio file cannot be used: not a WAV, too long, no sample rate.
+    #[error("{0}")]
+    File(String),
     /// A model file is missing.
     #[error("model file {} not found", .0.display())]
     Model(PathBuf),

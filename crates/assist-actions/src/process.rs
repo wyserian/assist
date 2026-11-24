@@ -18,6 +18,19 @@ mod os;
 
 pub(crate) use os::shell_command;
 
+/// The ffmpeg program, run as an external process (recording, audio conversion).
+pub(crate) const FFMPEG: &str = if cfg!(windows) {
+    "ffmpeg.exe"
+} else {
+    "ffmpeg"
+};
+/// How to install ffmpeg on this OS, for error messages.
+pub(crate) const FFMPEG_INSTALL: &str = if cfg!(windows) {
+    "winget install ffmpeg"
+} else {
+    "your package manager, e.g. apt install ffmpeg"
+};
+
 /// Longer output lines are split, so a process that never prints a newline cannot grow memory.
 const MAX_LINE: usize = 16 * 1024;
 

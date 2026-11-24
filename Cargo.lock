@@ -149,6 +149,7 @@ name = "assist-actions"
 version = "0.3.0"
 dependencies = [
  "assist-core",
+ "assist-voice",
  "directories",
  "open",
  "process-wrap",
