@@ -1,0 +1,16 @@
+# The screen. Typed forms keep the file name as written: "screenshot ~/shot.png",
+# "ocr ~/scan.png".
+
+[screenshot]
+reply = "Taking a screenshot."
+phrases = [
+    "(take|grab|capture) (a)? (screenshot|screen shot|screen grab)",
+    "screenshot (please)?",
+]
+
+[ocr]
+reply = "Reading the text."
+phrases = [
+    "(read|scan) (the)? (text on)? (the)? screen",
+    "what does the screen say",
+]

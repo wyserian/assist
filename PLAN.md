@@ -505,7 +505,7 @@ Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM plan
 
 | Concern | Choice |
 |---|---|
-| OCR | trait: Windows built-in OCR on Windows, `ocrs` elsewhere, Tesseract external fallback |
+| OCR | trait: Windows built-in OCR on Windows (built), `ocrs` elsewhere, Tesseract external fallback |
 | Web | `reqwest` (rustls), `scraper`; `chromiumoxide` later |
 
 ### Messaging
@@ -1026,6 +1026,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | `unsafe_code` lowered from `forbid` to `deny` so exactly one audited module may opt out: `assist-actions/src/facts_win32.rs` (read-only Win32: foreground window, process image name, last input time), each call with a SAFETY comment. Approved by the owner; any other `unsafe` still fails the build |
 | 2026-11-25 | Triggers (Phase 3 step 4): rules in core (`trigger.rs`: schedule parsing and next time, fact edges; `Engine::unattended`), clock and folder watching in `assist-cli` (no OS I/O in core). New crates, approved: `jiff` 1.0 (local time zone, DST; MIT OR Unlicense) and `notify` 9.0 (CC0-1.0, deny exception; brings `xxhash-rust`, BSL-1.0, deny exception) |
 | 2026-11-25 | Bulk rename (Phase 3 step 5a): `rename <find> [to] <replace> in <folder>` (files in one folder, at most 1000, no clashes or swaps) and `undo [job]`, both `rename.bulk` (confirm). Action `preview` hook plus frozen `preview` slot gives the exact file list in the confirmation; undo records in `<data>/undo/<job>.json`. `Engine::new(config, phrases, Device)` bundles commands, shell offer, facts and the previewer |
+| 2026-11-25 | Screenshot and OCR (Phase 3 step 5b): `screenshot [file]` (xcap, primary monitor, PNG, default `Pictures/assist-<job>.png`) and `ocr [screen | image]` (Windows built-in OCR through WinRT, safe calls; output untrusted so the taint rule applies). Windows only for now: xcap on Linux needs PipeWire, XCB and libclang at build time, and Linux has no OCR engine yet (`ocrs` or Tesseract later). Typed commands also work as pipe stages (`ocr scan.png \| filter error`) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

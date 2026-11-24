@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename"]
+default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename", "screen"]
 shell = ["dep:process-wrap", "dep:tokio"]
 scripts = ["shell", "dep:toml"]
 apps = ["dep:open", "dep:tokio", "dep:toml"]
@@ -17,6 +17,7 @@ search = ["dep:open", "dep:tokio"]
 transforms = ["dep:regex", "dep:tokio"]
 facts = ["dep:windows"]
 rename = ["dep:serde", "dep:serde_json", "dep:tokio"]
+screen = ["dep:xcap", "dep:windows", "dep:tokio"]
 
 [dependencies]
 assist-core.workspace = true
@@ -29,7 +30,15 @@ tokio = { workspace = true, optional = true, features = ["fs", "io-util", "macro
 toml = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
+# Screen capture; Windows only until Linux gets OCR (xcap needs PipeWire and XCB there).
+xcap = { workspace = true, optional = true }
 windows = { workspace = true, optional = true, features = [
+    "Foundation_Collections",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Security_Cryptography",
+    "Storage",
+    "Storage_Streams",
     "System_Power",
     "Win32_Foundation",
     "Win32_System_SystemInformation",

@@ -44,6 +44,7 @@ toml = "1"
 toml_edit = "0.25"
 uuid = "1"
 windows = "0.62"
+xcap = "0.9"
 
 [workspace.lints.rust]
 # deny, not forbid, so one audited module may opt out: the Win32 fact reader in

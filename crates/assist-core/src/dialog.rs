@@ -434,6 +434,9 @@ impl Engine {
                 typed: false,
             });
         }
+        if let Some(plan) = self.typed_command(text) {
+            return Some(plan);
+        }
         let intent = self.matcher.best(text)?;
         if !intent.ambiguous.is_empty() || self.missing(&intent).is_some() {
             return None;

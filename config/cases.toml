@@ -111,6 +111,19 @@ text = "turn volume to twenty-five"
 command = "set_volume"
 slots = { level = "25" }
 
+# the screen
+[[case]]
+text = "take a screenshot"
+command = "screenshot"
+
+[[case]]
+text = "read the text on the screen"
+command = "ocr"
+
+[[case]]
+text = "what does the screen say"
+command = "ocr"
+
 # saved pipes
 [[case]]
 text = "run errors"
