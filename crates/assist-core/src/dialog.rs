@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use assist_proto::rpc::Explanation;
 
-use crate::action::{DataKind, PipeShape};
+use crate::action::{DataKind, PipeShape, PREVIEW_SLOT};
 use crate::condition::Condition;
 use crate::config::{Config, ConfigError};
 use crate::facts::Facts;
@@ -27,6 +27,9 @@ pub const SHELL: &str = "shell";
 
 /// The phrase-only command for "run <saved pipe>"; the dialog expands it into the pipe.
 pub const RUN_PIPE: &str = "run_pipe";
+
+/// Preview lines shown in a confirmation; the rest are counted.
+const PREVIEW_SHOWN: usize = 20;
 
 /// How long a question waits for its answer.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
@@ -67,6 +70,32 @@ pub struct CommandInfo {
     pub pipe: PipeShape,
 }
 
+/// What this device brings to an [`Engine`].
+#[derive(Debug, Clone, Default)]
+pub struct Device {
+    /// The commands this device can run.
+    pub commands: BTreeMap<String, CommandInfo>,
+    /// Offer unmatched input as a shell command (desktop).
+    pub offer_shell: bool,
+    /// Current device state.
+    pub facts: Facts,
+    /// Shows what a plan would change before it is confirmed.
+    pub preview: Option<Arc<dyn Preview>>,
+}
+
+/// Shows exactly what a plan would change before anyone confirms it (PLAN.md section 3.5,
+/// confirmation binding). The scheduler implements it over its actions.
+pub trait Preview: Send + Sync {
+    /// `None` when the command has no preview; `Err` when the plan cannot run as asked.
+    fn preview(&self, plan: &Plan) -> Option<Result<Vec<String>, String>>;
+}
+
+impl std::fmt::Debug for dyn Preview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Preview")
+    }
+}
+
 /// Why an [`Engine`] could not be built.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -92,6 +121,7 @@ pub struct Engine {
     offer_shell: bool,
     /// Current device state, for saved pipes' `if`.
     facts: Facts,
+    preview: Option<Arc<dyn Preview>>,
 }
 
 impl Engine {
@@ -100,10 +130,14 @@ impl Engine {
     pub fn new(
         config: Arc<Config>,
         phrases: &PhraseSet,
-        commands: BTreeMap<String, CommandInfo>,
-        offer_shell: bool,
-        facts: Facts,
+        device: Device,
     ) -> Result<Self, EngineError> {
+        let Device {
+            commands,
+            offer_shell,
+            facts,
+            preview,
+        } = device;
         config.validate_commands(phrases)?;
         let matcher = RuleMatcher::new(phrases, &config)?;
         let policy = Policy::new(&config.policy);
@@ -126,6 +160,7 @@ impl Engine {
             asks,
             offer_shell,
             facts,
+            preview,
         };
         // A saved pipe that cannot work is a config error now, not when its trigger fires.
         // A stage this device lacks is not: the same config serves devices with other
@@ -144,25 +179,22 @@ impl Engine {
 
     /// The same engine with other phrases, e.g. after a phrase was added.
     pub fn with_phrases(&self, phrases: &PhraseSet) -> Result<Self, EngineError> {
-        Self::new(
-            Arc::clone(&self.config),
-            phrases,
-            self.commands.clone(),
-            self.offer_shell,
-            self.facts.clone(),
-        )
+        Self::new(Arc::clone(&self.config), phrases, self.device())
     }
 
     /// The same engine with another config, e.g. after a setting changed. Fails if the
     /// config names unknown commands.
     pub fn with_config(&self, config: Arc<Config>) -> Result<Self, EngineError> {
-        Self::new(
-            config,
-            &self.phrases,
-            self.commands.clone(),
-            self.offer_shell,
-            self.facts.clone(),
-        )
+        Self::new(config, &self.phrases, self.device())
+    }
+
+    fn device(&self) -> Device {
+        Device {
+            commands: self.commands.clone(),
+            offer_shell: self.offer_shell,
+            facts: self.facts.clone(),
+            preview: self.preview.clone(),
+        }
     }
 
     /// The config the engine was built from.
@@ -235,13 +267,18 @@ impl Engine {
         let slots: Vec<String> = plan
             .slots
             .iter()
+            .filter(|(slot, _)| slot.as_str() != PREVIEW_SLOT)
             .map(|(slot, value)| format!("{slot} = {}", self.shown(&plan.command, slot, value)))
             .collect();
-        if slots.is_empty() {
+        let mut text = if slots.is_empty() {
             plan.command.clone()
         } else {
             format!("{}: {}", plan.command, slots.join(", "))
+        };
+        if let Some(preview) = plan.slots.get(PREVIEW_SLOT) {
+            text.push_str(&format!(" ({} changes)", preview.lines().count()));
         }
+        text
     }
 
     /// A pipe read back stage by stage, `run_script: script = build | count`, with what
@@ -358,6 +395,25 @@ impl Engine {
         })
     }
 
+    /// A command typed as `<name> <rest>` (`rename IMG_ to trip_ in ~/Pictures`): one whose
+    /// manifest names an `arg` slot and that reads no pipe input. The rest is kept as typed.
+    fn typed_command(&self, text: &str) -> Option<Plan> {
+        let (word, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+        let name = word.to_lowercase();
+        let info = self.commands.get(&name)?;
+        let slot = info.pipe.arg.filter(|_| !info.pipe.is_transform())?;
+        let rest = rest.trim();
+        let slots = (!rest.is_empty())
+            .then(|| (slot.to_owned(), rest.to_owned()))
+            .into_iter()
+            .collect();
+        Some(Plan {
+            command: name,
+            slots,
+            typed: true,
+        })
+    }
+
     /// One pipe stage as a plan: a transform written `<name> <arg>`, or any command the
     /// matcher fully resolves (no question to ask, no choice to make).
     fn stage(&self, text: &str) -> Option<Plan> {
@@ -436,6 +492,44 @@ impl Engine {
             _ => None,
         };
         own.unwrap_or_else(|| self.say(Line::Confirm, &[("action", &self.readback_pipe(pipe))]))
+    }
+
+    /// The frozen previews to show before the confirmation question, one line each.
+    fn preview_lines(&self, pipe: &Pipe) -> Vec<String> {
+        let mut out = Vec::new();
+        for preview in pipe.stages.iter().filter_map(|p| p.slots.get(PREVIEW_SLOT)) {
+            let lines: Vec<&str> = preview.lines().collect();
+            out.extend(
+                lines
+                    .iter()
+                    .take(PREVIEW_SHOWN)
+                    .map(|line| format!("  {line}")),
+            );
+            if lines.len() > PREVIEW_SHOWN {
+                out.push(format!("  and {} more", lines.len() - PREVIEW_SHOWN));
+            }
+        }
+        out
+    }
+
+    /// Freezes each stage's preview into its plan; the error is the line to say.
+    fn freeze_previews(&self, pipe: &mut Pipe) -> Result<(), String> {
+        let Some(preview) = &self.preview else {
+            return Ok(());
+        };
+        for plan in &mut pipe.stages {
+            match preview.preview(plan) {
+                None => {}
+                Some(Err(reason)) => return Err(reason),
+                Some(Ok(lines)) if lines.is_empty() => {
+                    return Err(self.say(Line::NothingToDo, &[]));
+                }
+                Some(Ok(lines)) => {
+                    plan.slots.insert(PREVIEW_SLOT.to_owned(), lines.join("\n"));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// What is said when `plan` starts: the command's own `reply` line, else a short
@@ -728,6 +822,9 @@ impl Dialog {
         if raw.contains('|') {
             return self.pipe(raw, reply);
         }
+        if let Some(plan) = self.engine.typed_command(raw) {
+            return self.decide(plan.into(), None, reply);
+        }
         if let (Some(value), Some(last)) = (correction(norm), self.last.clone()) {
             return self.correct(last, value, reply);
         }
@@ -862,7 +959,10 @@ impl Dialog {
         }
     }
 
-    fn decide(&mut self, pipe: Pipe, intent: Option<Intent>, reply: &mut Reply) {
+    fn decide(&mut self, mut pipe: Pipe, intent: Option<Intent>, reply: &mut Reply) {
+        if let Err(line) = self.engine.freeze_previews(&mut pipe) {
+            return reply.say.push(line);
+        }
         match self.engine.pipe_decision(&self.owner, &pipe) {
             None => reply.say.push(self.engine.say(Line::Unavailable, &[])),
             Some(Decision::Deny) => {
@@ -872,6 +972,8 @@ impl Dialog {
                 reply.say.push(line);
             }
             Some(Decision::Confirm) => {
+                // The question comes last: clients show the last line as what is asked.
+                reply.say.extend(self.engine.preview_lines(&pipe));
                 reply.say.push(self.engine.confirm_question(&pipe));
                 self.state = State::Confirming { pipe, intent };
             }
@@ -1102,10 +1204,18 @@ alert = { run = "run build | save errors.txt" }
         ])
     }
 
+    fn device(commands: BTreeMap<String, CommandInfo>, offer_shell: bool) -> Device {
+        Device {
+            commands,
+            offer_shell,
+            ..Device::default()
+        }
+    }
+
     fn engine(offer_shell: bool, commands: BTreeMap<String, CommandInfo>) -> Arc<Engine> {
         let config = Arc::new(Config::from_toml(CONFIG).unwrap());
         let phrases = PhraseSet::default_en().unwrap();
-        Arc::new(Engine::new(config, &phrases, commands, offer_shell, Facts::default()).unwrap())
+        Arc::new(Engine::new(config, &phrases, device(commands, offer_shell)).unwrap())
     }
 
     /// Runs `lines` through one dialog: `>` input, `<` reply, `!` scheduled plan.
@@ -1224,9 +1334,7 @@ alert = { run = "run build | save errors.txt" }
         let fewer = super::Engine::new(
             Arc::new(Config::from_toml(CONFIG).unwrap()),
             &PhraseSet::default_en().unwrap(),
-            BTreeMap::new(),
-            true,
-            Facts::default(),
+            device(BTreeMap::new(), true),
         )
         .unwrap();
         assert_eq!(
@@ -1272,7 +1380,7 @@ alert = { run = "run build | save errors.txt" }
         );
         let config = Arc::new(Config::from_toml(&config).unwrap());
         let phrases = PhraseSet::default_en().unwrap();
-        let err = Engine::new(config, &phrases, commands(), true, Facts::default()).unwrap_err();
+        let err = Engine::new(config, &phrases, device(commands(), true)).unwrap_err();
         assert_eq!(
             err.to_string(),
             "[pipes] bad: \"head 3\" needs input: put a command and | before it."
@@ -1304,9 +1412,7 @@ send = {{ local = \"allow\" }}
             Engine::new(
                 config,
                 &PhraseSet::default_en().unwrap(),
-                commands,
-                true,
-                Facts::default(),
+                device(commands, true),
             )
             .unwrap(),
         );
@@ -1331,9 +1437,10 @@ send = {{ local = \"allow\" }}
             Engine::new(
                 config,
                 &PhraseSet::default_en().unwrap(),
-                commands(),
-                true,
-                facts.clone(),
+                Device {
+                    facts: facts.clone(),
+                    ..device(commands(), true)
+                },
             )
             .unwrap(),
         );
@@ -1361,9 +1468,7 @@ send = {{ local = \"allow\" }}
         let engine = Engine::new(
             config,
             &PhraseSet::default_en().unwrap(),
-            commands(),
-            true,
-            Facts::default(),
+            device(commands(), true),
         )
         .unwrap();
         let timer = Principal::local("schedule");
@@ -1385,6 +1490,54 @@ send = {{ local = \"allow\" }}
             .unwrap_err()
             .contains("confirmation"));
         assert_eq!(engine.unattended("later", &timer), Ok(None));
+    }
+
+    #[test]
+    fn a_preview_is_shown_and_frozen_into_the_plan() {
+        struct Files;
+        impl Preview for Files {
+            fn preview(&self, plan: &Plan) -> Option<Result<Vec<String>, String>> {
+                (plan.command == "rename").then(|| {
+                    match plan.slots.get("spec").map(String::as_str) {
+                        Some("none") => Ok(Vec::new()),
+                        _ => Ok(vec!["a.jpg -> b.jpg".to_owned()]),
+                    }
+                })
+            }
+        }
+        let mut commands = commands();
+        commands.insert(
+            "rename".to_owned(),
+            CommandInfo {
+                capabilities: vec![C::RenameBulk],
+                owner_defined: false,
+                pipe: PipeShape {
+                    arg: Some("spec"),
+                    ..PipeShape::SOURCE
+                },
+            },
+        );
+        let device = Device {
+            preview: Some(Arc::new(Files)),
+            ..device(commands, true)
+        };
+        let config = Arc::new(Config::from_toml(CONFIG).unwrap());
+        let engine =
+            Arc::new(Engine::new(config, &PhraseSet::default_en().unwrap(), device).unwrap());
+        let owner = Principal::local("cli");
+        let mut dialog = Dialog::new(engine, owner.clone());
+        let asked = dialog.handle(&owner, "rename a to b in /x", Instant::now());
+        assert_eq!(
+            asked.say,
+            [
+                "  a.jpg -> b.jpg",
+                "rename: spec = a to b in /x (1 changes)?"
+            ]
+        );
+        let ran = dialog.handle(&owner, "yes", Instant::now());
+        assert_eq!(ran.run[0].stages[0].slots[PREVIEW_SLOT], "a.jpg -> b.jpg");
+        let nothing = dialog.handle(&owner, "rename none", Instant::now());
+        assert_eq!(nothing.say, ["Nothing to change."]);
     }
 
     #[test]

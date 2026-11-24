@@ -256,6 +256,14 @@ pub struct JobCtx { job: JobId, principal: Principal, cancel: CancellationToken,
 
 - Unsupported on this device → "not available here" or route to a node that has it (§3.13).
 - `undo = true` actions write an undo record (bulk rename first).
+- **Preview** (built with bulk rename): an action may implement `preview(plan)`, returning
+  one line per change. Before deciding, the dialog calls it through the scheduler, shows the
+  lines before the confirmation question and freezes them into the plan's `preview` slot;
+  `run` recomputes and refuses when the changes differ ("the files changed since you
+  confirmed"). This is how a confirmation shows the exact file list (§3.5).
+- **Typed commands:** a command whose manifest names an `arg` slot and reads no input can be
+  typed `<name> <rest>`, with the rest kept as typed (`rename IMG_ to trip_ in ~/Pictures`,
+  `undo`, `undo 12`).
 
 ### 3.10 Facts (device state)
 
@@ -1017,6 +1025,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Facts (Phase 3 step 3): core `Facts` store and `Condition` language; `if` on saved pipes checked by the dialog (a skipped pipe makes no jobs). Battery facts through safe APIs only (WinRT `PowerManager`, Linux sysfs); focused app and idle time wait for a decision on an audited `unsafe` exception, since `unsafe_code` is forbidden workspace-wide |
 | 2026-11-25 | `unsafe_code` lowered from `forbid` to `deny` so exactly one audited module may opt out: `assist-actions/src/facts_win32.rs` (read-only Win32: foreground window, process image name, last input time), each call with a SAFETY comment. Approved by the owner; any other `unsafe` still fails the build |
 | 2026-11-25 | Triggers (Phase 3 step 4): rules in core (`trigger.rs`: schedule parsing and next time, fact edges; `Engine::unattended`), clock and folder watching in `assist-cli` (no OS I/O in core). New crates, approved: `jiff` 1.0 (local time zone, DST; MIT OR Unlicense) and `notify` 9.0 (CC0-1.0, deny exception; brings `xxhash-rust`, BSL-1.0, deny exception) |
+| 2026-11-25 | Bulk rename (Phase 3 step 5a): `rename <find> [to] <replace> in <folder>` (files in one folder, at most 1000, no clashes or swaps) and `undo [job]`, both `rename.bulk` (confirm). Action `preview` hook plus frozen `preview` slot gives the exact file list in the confirmation; undo records in `<data>/undo/<job>.json`. `Engine::new(config, phrases, Device)` bundles commands, shell offer, facts and the previewer |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

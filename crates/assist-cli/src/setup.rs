@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use assist_core::audit::Audit;
 use assist_core::config::Config;
-use assist_core::dialog::{Engine, LiveEngine};
+use assist_core::dialog::{Device, Engine, LiveEngine};
 use assist_core::facts::Facts;
 use assist_core::phrases::PhraseSet;
 use assist_core::scheduler::{Persistence, Scheduler};
@@ -150,18 +150,23 @@ impl Assistant {
                 audit: Some(audit.clone()),
                 store: Some(store.clone()),
                 redactor: secrets.as_ref().map(|secrets| secrets.redactor()),
+                data_dir: Some(paths.data.clone()),
             },
         );
         let mut phrases = PhraseSet::default_en()?;
         phrases.extend(PhraseSet::load_dir(&paths.phrases_dir())?);
         let facts = Facts::default();
         tokio::spawn(sample_facts(facts.clone()));
+        let device = Device {
+            commands: scheduler.commands(),
+            offer_shell: true,
+            facts: facts.clone(),
+            preview: Some(Arc::new(scheduler.clone())),
+        };
         let engine = Arc::new(LiveEngine::new(Arc::new(Engine::new(
             Arc::clone(&config),
             &phrases,
-            scheduler.commands(),
-            true,
-            facts.clone(),
+            device,
         )?)));
         Ok(Self {
             config,

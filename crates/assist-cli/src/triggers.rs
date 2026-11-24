@@ -67,7 +67,12 @@ pub fn start(config: &Config, runner: Runner) {
     let folders: Vec<(PathBuf, String)> = config
         .triggers
         .iter()
-        .filter_map(|t| Some((home(t.watch.as_deref()?), t.run.clone())))
+        .filter_map(|t| {
+            Some((
+                assist_actions::expand_home(t.watch.as_deref()?),
+                t.run.clone(),
+            ))
+        })
         .collect();
     if !schedules.is_empty() || !edges.is_empty() {
         tokio::spawn(clock(schedules, edges, runner.clone()));
@@ -188,15 +193,6 @@ impl Runner {
     }
 }
 
-/// `~/x` as a path in the home folder.
-fn home(path: &str) -> PathBuf {
-    let path = path.trim();
-    match (path.strip_prefix("~"), directories::BaseDirs::new()) {
-        (Some(rest), Some(dirs)) => dirs.home_dir().join(rest.trim_start_matches(['/', '\\'])),
-        _ => PathBuf::from(path),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +200,7 @@ mod tests {
     #[test]
     fn tilde_means_home() {
         let dirs = directories::BaseDirs::new().unwrap();
+        let home = assist_actions::expand_home;
         assert_eq!(home("~/Downloads"), dirs.home_dir().join("Downloads"));
         assert_eq!(home("/tmp/x"), PathBuf::from("/tmp/x"));
     }

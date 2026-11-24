@@ -13,7 +13,7 @@ use assist_core::action::{
 };
 use assist_core::audit::Audit;
 use assist_core::config::Config;
-use assist_core::dialog::{Engine, LiveEngine, SHELL};
+use assist_core::dialog::{Device, Engine, LiveEngine, SHELL};
 use assist_core::facts::Facts;
 use assist_core::phrases::PhraseSet;
 use assist_core::policy::Capability;
@@ -114,15 +114,19 @@ async fn start(name: &str) -> Daemon {
             audit: Some(audit.clone()),
             store: Some(store.clone()),
             redactor: Some(secrets.redactor()),
+            data_dir: None,
         },
     );
     let engine = Arc::new(LiveEngine::new(Arc::new(
         Engine::new(
             config,
             &PhraseSet::default_en().unwrap(),
-            scheduler.commands(),
-            true,
-            Facts::default(),
+            Device {
+                commands: scheduler.commands(),
+                offer_shell: true,
+                facts: Facts::default(),
+                preview: None,
+            },
         )
         .unwrap(),
     )));

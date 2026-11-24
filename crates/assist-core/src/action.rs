@@ -124,6 +124,9 @@ pub struct JobCtx {
     pub cwd: PathBuf,
     /// Cancelled on stop, timeout and STOP ALL. Dropping the future also stops the job.
     pub cancel: CancellationToken,
+    /// The assistant's data directory, for records such as undo; `None` in tests and the
+    /// offline shell without one.
+    pub data_dir: Option<PathBuf>,
 }
 
 /// Why an action failed.
@@ -167,4 +170,25 @@ pub trait Action: Send + Sync {
     /// Runs the job, streaming output to `out`. Must stop promptly when `ctx.cancel` fires
     /// or the future is dropped (processes are killed on drop).
     fn run(&self, ctx: JobCtx, input: Input, out: Output) -> BoxFuture<Result<(), ActionError>>;
+
+    /// What the plan would change, one line each, before anyone confirms it (the files a
+    /// bulk rename touches). The dialog shows it and freezes it into the plan's `preview`
+    /// slot; `run` must refuse when its changes no longer match. Blocking and bounded.
+    /// `Err` when the plan cannot run as asked.
+    fn preview(
+        &self,
+        _plan: &Plan,
+        _config: &Config,
+        _data_dir: Option<&std::path::Path>,
+    ) -> Option<Result<Vec<String>, String>> {
+        None
+    }
+}
+
+/// The plan slot that holds a frozen preview, one change per line.
+pub const PREVIEW_SLOT: &str = "preview";
+
+/// Whether a run's changes still match the preview that was confirmed.
+pub fn matches_preview(plan: &Plan, changes: &[String]) -> bool {
+    plan.slots.get(PREVIEW_SLOT).map(String::as_str) == Some(changes.join("\n").as_str())
 }

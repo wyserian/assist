@@ -11,6 +11,8 @@ pub mod apps;
 pub mod facts;
 #[cfg(feature = "shell")]
 mod process;
+#[cfg(feature = "rename")]
+pub mod rename;
 #[cfg(feature = "scripts")]
 pub mod scripts;
 #[cfg(feature = "search")]
@@ -36,7 +38,18 @@ pub fn builtin() -> Vec<Arc<dyn Action>> {
     actions.push(Arc::new(search::Search));
     #[cfg(feature = "transforms")]
     actions.extend(transforms::all());
+    #[cfg(feature = "rename")]
+    actions.extend(rename::all());
     actions
+}
+
+/// `~/x` as a path in the home folder; other paths unchanged.
+pub fn expand_home(path: &str) -> std::path::PathBuf {
+    let path = path.trim();
+    match (path.strip_prefix('~'), directories::BaseDirs::new()) {
+        (Some(rest), Some(dirs)) => dirs.home_dir().join(rest.trim_start_matches(['/', '\\'])),
+        _ => std::path::PathBuf::from(path),
+    }
 }
 
 #[cfg(test)]
@@ -68,6 +81,7 @@ pub(crate) mod testing {
             config: Arc::new(Config::from_toml(config).unwrap()),
             cwd,
             cancel: CancellationToken::new(),
+            data_dir: None,
         }
     }
 

@@ -123,9 +123,12 @@ name = "assist-actions"
 version = "0.3.0"
 dependencies = [
  "assist-core",
+ "directories",
  "open",
  "process-wrap",
  "regex",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-util",
  "toml",

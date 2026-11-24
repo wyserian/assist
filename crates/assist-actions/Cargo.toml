@@ -9,18 +9,22 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-default = ["shell", "scripts", "apps", "search", "transforms", "facts"]
+default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename"]
 shell = ["dep:process-wrap", "dep:tokio"]
 scripts = ["shell", "dep:toml"]
 apps = ["dep:open", "dep:tokio", "dep:toml"]
 search = ["dep:open", "dep:tokio"]
 transforms = ["dep:regex", "dep:tokio"]
 facts = ["dep:windows"]
+rename = ["dep:serde", "dep:serde_json", "dep:tokio"]
 
 [dependencies]
 assist-core.workspace = true
 open = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
+directories.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["fs", "io-util", "macros", "process", "rt"] }
 toml = { workspace = true, optional = true }
 

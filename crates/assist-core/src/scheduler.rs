@@ -95,6 +95,8 @@ pub struct Persistence {
     pub store: Option<Store>,
     /// Scrubs secret values from titles and output before anything is stored or shown.
     pub redactor: Option<Redactor>,
+    /// Data directory handed to actions (undo records).
+    pub data_dir: Option<PathBuf>,
 }
 
 /// Something that happened to a job.
@@ -180,6 +182,7 @@ struct Inner {
     audit: Option<Audit>,
     store: Option<Store>,
     redactor: Option<Redactor>,
+    data_dir: Option<PathBuf>,
 }
 
 struct Slot {
@@ -224,6 +227,7 @@ impl Scheduler {
                 audit: persistence.audit,
                 store: persistence.store,
                 redactor: persistence.redactor,
+                data_dir: persistence.data_dir,
             }),
         }
     }
@@ -357,6 +361,16 @@ struct Retry {
     tries: u32,
     on_error: Vec<Stage>,
     origin: Origin,
+}
+
+impl crate::dialog::Preview for Scheduler {
+    fn preview(&self, plan: &Plan) -> Option<Result<Vec<String>, String>> {
+        let inner = &self.inner;
+        inner
+            .actions
+            .get(&plan.command)?
+            .preview(plan, &inner.config, inner.data_dir.as_deref())
+    }
 }
 
 /// Runs a pipe once its lane has room, holding one slot for the whole group (so a long
@@ -575,6 +589,7 @@ impl Inner {
                 config: Arc::clone(&self.config),
                 cwd: origin.cwd.clone(),
                 cancel: group.child_token(),
+                data_dir: self.data_dir.clone(),
             };
             out.push((Arc::clone(action), ctx));
         }
