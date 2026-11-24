@@ -39,7 +39,15 @@ CREATE TABLE IF NOT EXISTS jobs (
     exit INTEGER
 );
 CREATE INDEX IF NOT EXISTS jobs_finished ON jobs (finished);
+CREATE TABLE IF NOT EXISTS misses (
+    text TEXT PRIMARY KEY,
+    count INTEGER NOT NULL,
+    last INTEGER NOT NULL
+);
 ";
+
+/// Unmatched sentences kept; the least recent are dropped.
+const MAX_MISSES: i64 = 200;
 
 /// Why the store could not be opened or read.
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +75,8 @@ enum Op {
     Insert(Row),
     Update(Row),
     Output(JobId, String),
+    Miss(String),
+    ForgetMiss(String),
     Flush(mpsc::Sender<()>),
     Close(mpsc::Sender<()>),
 }
@@ -150,6 +160,30 @@ impl Store {
 
     pub(crate) fn output(&self, id: JobId, line: &str) {
         let _ = self.writes.send(Op::Output(id, line.to_owned()));
+    }
+
+    /// Counts one more sentence that matched no command.
+    pub fn record_miss(&self, text: &str) {
+        let _ = self.writes.send(Op::Miss(text.to_owned()));
+    }
+
+    /// Forgets an unmatched sentence (it became a phrase, or was dismissed).
+    pub fn forget_miss(&self, text: &str) {
+        let _ = self.writes.send(Op::ForgetMiss(text.to_owned()));
+    }
+
+    /// Up to `limit` unmatched sentences, most frequent first: (text, count, last seen ms).
+    /// Blocking.
+    pub fn misses(&self, limit: usize) -> Result<Vec<(String, u64, u64)>, StoreError> {
+        let db = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut query = db.prepare(
+            "SELECT text, count, last FROM misses ORDER BY count DESC, last DESC LIMIT ?1",
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = query.query_map(params![limit], |row| {
+            Ok((row.get(0)?, from_db(row.get(1)?), from_db(row.get(2)?)))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Blocks until every write sent so far is on disk.
@@ -357,6 +391,22 @@ impl Writer {
                 }
                 let _ = done.send(());
             }
+            Op::Miss(text) => {
+                self.db.execute(
+                    "INSERT INTO misses (text, count, last) VALUES (?1, 1, ?2)
+                     ON CONFLICT(text) DO UPDATE SET count = count + 1, last = ?2",
+                    params![text, to_db(now_ms())],
+                )?;
+                self.db.execute(
+                    "DELETE FROM misses WHERE text NOT IN
+                     (SELECT text FROM misses ORDER BY last DESC LIMIT ?1)",
+                    params![MAX_MISSES],
+                )?;
+            }
+            Op::ForgetMiss(text) => {
+                self.db
+                    .execute("DELETE FROM misses WHERE text = ?1", params![text])?;
+            }
             Op::Close(_) => {}
         }
         Ok(())
@@ -529,6 +579,25 @@ mod tests {
             JobState::Interrupted
         );
         assert!(store.last_error().is_none());
+        store.close();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn misses_are_counted_and_forgotten() {
+        let dir = temp_dir("misses");
+        let (store, _) = Store::open(&dir, &JobsConfig::default()).unwrap();
+        for _ in 0..3 {
+            store.record_miss("fire up firefox");
+        }
+        store.record_miss("make me a sandwich");
+        store.flush();
+        let misses = store.misses(10).unwrap();
+        let counts: Vec<_> = misses.iter().map(|(t, c, _)| (t.as_str(), *c)).collect();
+        assert_eq!(counts, [("fire up firefox", 3), ("make me a sandwich", 1)]);
+        store.forget_miss("fire up firefox");
+        store.flush();
+        assert_eq!(store.misses(10).unwrap().len(), 1);
         store.close();
         fs::remove_dir_all(&dir).unwrap();
     }

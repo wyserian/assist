@@ -15,6 +15,7 @@ use assist_core::action::Chunk;
 use assist_core::dialog::{Dialog, Engine};
 use assist_core::policy::Principal;
 use assist_core::scheduler::{JobEvent, JobId, Scheduler};
+use assist_core::store::Store;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::broadcast::{self, error::RecvError};
 
@@ -37,6 +38,7 @@ const MAX_INPUT: usize = 8 * 1024;
 struct Repl {
     scheduler: Scheduler,
     engine: Arc<Engine>,
+    store: Store,
     dialog: Dialog,
     owner: Principal,
     cwd: PathBuf,
@@ -52,9 +54,10 @@ pub async fn run(paths: Paths) -> Result<()> {
     let assistant = Assistant::start(&paths)?;
     let owner = Principal::local("cli");
     let mut repl = Repl {
-        dialog: Dialog::new(Arc::clone(&assistant.engine), owner.clone()),
+        dialog: Dialog::new(assistant.engine.get(), owner.clone()),
+        store: assistant.store.clone(),
         scheduler: assistant.scheduler.clone(),
-        engine: Arc::clone(&assistant.engine),
+        engine: assistant.engine.get(),
         owner,
         cwd: std::env::current_dir()?,
     };
@@ -130,6 +133,9 @@ impl Repl {
 
     fn converse(&mut self, line: &str) {
         let reply = self.dialog.handle(&self.owner, line, Instant::now());
+        if let Some(missed) = &reply.missed {
+            self.store.record_miss(missed);
+        }
         for say in reply.say {
             println!("{}", printable(&say));
         }

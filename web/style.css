@@ -105,6 +105,11 @@ form {
   clip: rect(0 0 0 0);
 }
 
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 #signin {
   padding: 12px;
   color: var(--danger);

@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use assist_core::action::Chunk;
@@ -41,7 +42,7 @@ pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Cred
     let principal = Principal::local(source);
     let mut events = state.services.scheduler.subscribe();
     let mut conn = Conn {
-        dialog: Dialog::new(state.services.engine.clone(), principal.clone()),
+        dialog: Dialog::new(state.services.engine.get(), principal.clone()),
         cwd: state.services.default_cwd.clone(),
         state,
         id,
@@ -149,7 +150,12 @@ impl Conn {
     /// Runs `text` through this client's dialog, starts the resulting jobs and publishes
     /// the question it now waits on, if any.
     pub(crate) fn converse(&mut self, text: &str) -> Reply {
+        let engine = self.state.services.engine.get();
+        self.dialog.use_engine(Arc::clone(&engine));
         let reply = self.dialog.handle(&self.principal, text, Instant::now());
+        if let Some(missed) = &reply.missed {
+            self.state.services.store.record_miss(missed);
+        }
         let waiting = self.dialog.is_waiting();
         let question = waiting.then(|| reply.say.last().cloned()).flatten();
         self.state.set_question(self.id, question);
@@ -160,7 +166,7 @@ impl Conn {
             waiting,
         };
         for plan in reply.run {
-            let title = self.state.services.engine.readback(&plan);
+            let title = engine.readback(&plan);
             match scheduler.submit(plan, self.principal.clone(), title, self.cwd.clone()) {
                 Ok(id) => {
                     self.jobs.insert(id);

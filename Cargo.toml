@@ -36,6 +36,7 @@ tokio = "1"
 tokio-tungstenite = "0.30"
 tokio-util = "0.7"
 toml = "1"
+toml_edit = "0.25"
 uuid = "1"
 
 [workspace.lints.rust]

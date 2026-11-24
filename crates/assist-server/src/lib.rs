@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use assist_core::audit::Audit;
-use assist_core::dialog::Engine;
+use assist_core::dialog::LiveEngine;
 use assist_core::scheduler::Scheduler;
 use assist_core::secrets::Secrets;
 use assist_core::store::Store;
@@ -51,8 +51,10 @@ const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-
 pub struct Services {
     /// Runs jobs.
     pub scheduler: Scheduler,
-    /// Matcher, policy and available commands.
-    pub engine: Arc<Engine>,
+    /// Matcher, policy and available commands; replaced when phrases change.
+    pub engine: Arc<LiveEngine>,
+    /// The user phrase file that `phrases.add` writes to.
+    pub user_phrases: Option<PathBuf>,
     /// Job history.
     pub store: Store,
     /// Audit log, for the dashboard.

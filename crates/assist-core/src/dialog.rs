@@ -72,6 +72,7 @@ pub enum EngineError {
 #[derive(Debug)]
 pub struct Engine {
     config: Arc<Config>,
+    phrases: PhraseSet,
     matcher: RuleMatcher,
     policy: Policy,
     commands: BTreeMap<String, CommandInfo>,
@@ -103,6 +104,7 @@ impl Engine {
         }
         Ok(Self {
             config,
+            phrases: phrases.clone(),
             matcher,
             policy,
             commands,
@@ -111,9 +113,34 @@ impl Engine {
         })
     }
 
+    /// The same engine with other phrases, e.g. after a phrase was added.
+    pub fn with_phrases(&self, phrases: &PhraseSet) -> Result<Self, EngineError> {
+        Self::new(
+            Arc::clone(&self.config),
+            phrases,
+            self.commands.clone(),
+            self.offer_shell,
+        )
+    }
+
     /// The config the engine was built from.
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// The phrases the engine was built from.
+    pub fn phrases(&self) -> &PhraseSet {
+        &self.phrases
+    }
+
+    /// Whether this device can run `command`.
+    pub fn available(&self, command: &str) -> bool {
+        self.commands.contains_key(command)
+    }
+
+    /// The command an unmatched sentence most likely meant; see [`RuleMatcher::guess`].
+    pub fn guess(&self, text: &str) -> Option<String> {
+        self.matcher.guess(text)
     }
 
     /// What `text` would do for `principal`, without asking or running anything; `None` if
@@ -236,6 +263,39 @@ pub struct Reply {
     pub say: Vec<String>,
     /// Plans to schedule now, in order.
     pub run: Vec<Plan>,
+    /// The input, normalized, when it matched no command; callers record it so it can
+    /// become a phrase.
+    pub missed: Option<String>,
+}
+
+/// The current engine. Replaced when phrases change; each dialog picks up the new one on
+/// its next input.
+#[derive(Debug)]
+pub struct LiveEngine(std::sync::RwLock<Arc<Engine>>);
+
+impl LiveEngine {
+    /// Starts with `engine`.
+    pub fn new(engine: Arc<Engine>) -> Self {
+        Self(std::sync::RwLock::new(engine))
+    }
+
+    /// The current engine.
+    pub fn get(&self) -> Arc<Engine> {
+        Arc::clone(
+            &self
+                .0
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
+    /// Replaces the engine.
+    pub fn set(&self, engine: Arc<Engine>) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = engine;
+    }
 }
 
 #[derive(Debug)]
@@ -283,6 +343,13 @@ impl Dialog {
     /// Whether the dialog is waiting for an answer.
     pub fn is_waiting(&self) -> bool {
         !matches!(self.state, State::Idle)
+    }
+
+    /// Switches to `engine` (see [`LiveEngine`]) unless it is already the one in use.
+    pub fn use_engine(&mut self, engine: Arc<Engine>) {
+        if !Arc::ptr_eq(&self.engine, &engine) {
+            self.engine = engine;
+        }
     }
 
     /// Handles one input at time `now`.
@@ -400,6 +467,7 @@ impl Dialog {
     }
 
     fn unmatched(&mut self, raw: &str, reply: &mut Reply) {
+        reply.missed = Some(normalize(raw));
         if self.engine.offer_shell {
             let plan = Plan::shell(raw, false);
             let decision = self.engine.decision(&self.owner, &plan);
@@ -779,6 +847,16 @@ risky = true
             fewer.explain(&owner, "call dad").unwrap().decision,
             "unavailable"
         );
+    }
+
+    #[test]
+    fn unmatched_input_is_reported() {
+        let owner = Principal::local("cli");
+        let mut dialog = Dialog::new(engine(false, commands()), owner.clone());
+        let reply = dialog.handle(&owner, "Make me a Sandwich!", Instant::now());
+        assert_eq!(reply.missed.as_deref(), Some("make me a sandwich"));
+        let reply = dialog.handle(&owner, "open firefox", Instant::now());
+        assert_eq!(reply.missed, None);
     }
 
     #[test]

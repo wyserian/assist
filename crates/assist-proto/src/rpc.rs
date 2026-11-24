@@ -31,6 +31,60 @@ pub const CLIENTS_REVOKE: &str = "clients.revoke";
 pub const AUTH_OTP: &str = "auth.otp";
 /// The newest audit records. Params: [`AuditPage`]. Result: `Vec<AuditEntry>`, oldest first.
 pub const AUDIT_TAIL: &str = "audit.tail";
+/// Sentences that matched no command, most frequent first. Result: `Vec<Miss>`.
+pub const MISSES_LIST: &str = "misses.list";
+/// Forgets an unmatched sentence. Params: [`MissText`]. Result: `bool`.
+pub const MISSES_DISMISS: &str = "misses.dismiss";
+/// Adds a phrase to a command in the user phrase file and reloads phrases. Params:
+/// [`PhraseAdd`]. Result: `bool`.
+pub const PHRASES_ADD: &str = "phrases.add";
+/// Every command with its slots. Result: `Vec<CommandEntry>`.
+pub const COMMANDS_LIST: &str = "commands.list";
+
+/// A sentence that matched no command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Miss {
+    /// The sentence, normalized.
+    pub text: String,
+    /// How often it was said.
+    pub count: u64,
+    /// Last time, Unix ms.
+    pub last: u64,
+    /// The command it most likely meant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guess: Option<String>,
+}
+
+/// An unmatched sentence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissText {
+    /// The sentence as listed by `misses.list`.
+    pub text: String,
+}
+
+/// A phrase to add.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhraseAdd {
+    /// Command name.
+    pub command: String,
+    /// The phrase, e.g. `fire up .app.`.
+    pub phrase: String,
+    /// The unmatched sentence it came from; forgotten once the phrase is added.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub miss: Option<String>,
+}
+
+/// A command and its slots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandEntry {
+    /// Command name.
+    pub name: String,
+    /// Slot name -> type.
+    pub slots: BTreeMap<String, String>,
+    /// Whether this device can run it.
+    pub available: bool,
+}
+
 /// Questions clients are waiting on. Result: `Vec<Waiting>`.
 pub const DIALOGS_PENDING: &str = "dialogs.pending";
 /// Answers another client's question as that client. Params: [`DialogAnswer`]. Result:

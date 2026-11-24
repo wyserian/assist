@@ -5,7 +5,7 @@
 //! the one that explains the most input words literally (not via slots) wins; ties go to the
 //! command that sorts first.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use regex::{Regex, RegexSet};
 
@@ -122,6 +122,8 @@ pub struct RuleMatcher {
     types: BTreeMap<String, BTreeMap<String, SlotType>>,
     /// List name -> (normalized value, config key).
     lists: BTreeMap<String, Vec<(String, String)>>,
+    /// Command -> literal words of its phrases, for [`RuleMatcher::guess`].
+    words: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl RuleMatcher {
@@ -135,6 +137,7 @@ impl RuleMatcher {
 
         let mut compiled = Vec::new();
         let mut types = BTreeMap::new();
+        let mut words: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for (command, spec) in phrases.commands() {
             let kinds = slot_types(command, &spec.slots, &lists)?;
             for text in &spec.phrases {
@@ -143,6 +146,7 @@ impl RuleMatcher {
                     phrase: text.clone(),
                     source,
                 })?;
+                collect_words(&node, words.entry(command.to_owned()).or_default());
                 let mut pattern = String::from("^");
                 let mut slots = Vec::new();
                 emit(&node, &kinds, &mut pattern, &mut slots).map_err(|slot| {
@@ -166,7 +170,52 @@ impl RuleMatcher {
             phrases: compiled,
             types,
             lists,
+            words,
         })
+    }
+
+    /// The command whose phrases share the most words with `text`, to suggest where an
+    /// unmatched sentence could go. A word that is a value of one of the command's list slots
+    /// (an app, a contact) counts double. `None` when nothing is shared.
+    pub fn guess(&self, text: &str) -> Option<String> {
+        let normalized = normalize(text);
+        let input: Vec<&str> = normalized.split(' ').filter(|w| !w.is_empty()).collect();
+        let mut best: Option<(usize, &String)> = None;
+        for (command, words) in &self.words {
+            let lists: Vec<&String> = self
+                .types
+                .get(command)
+                .into_iter()
+                .flat_map(|slots| slots.values())
+                .filter_map(|ty| match ty {
+                    SlotType::List(list) => Some(list),
+                    _ => None,
+                })
+                .collect();
+            let score: usize = input
+                .iter()
+                .map(|word| {
+                    if words.contains(*word) {
+                        1
+                    } else if lists
+                        .iter()
+                        .any(|list| !self.candidates(list, word).is_empty())
+                    {
+                        2
+                    } else {
+                        0
+                    }
+                })
+                .sum();
+            let better = match best {
+                Some((top, _)) => score > top,
+                None => score > 0,
+            };
+            if better {
+                best = Some((score, command));
+            }
+        }
+        best.map(|(_, command)| command.clone())
     }
 
     /// The declared slots of a command and their types.
@@ -314,6 +363,22 @@ fn slot_types(
         .collect()
 }
 
+/// Adds every literal word of `node` to `words`.
+fn collect_words(node: &Node, words: &mut BTreeSet<String>) {
+    match node {
+        Node::Word(word) => {
+            words.insert(word.clone());
+        }
+        Node::Slot(_) => {}
+        Node::Choice(alternatives) => {
+            for node in alternatives.iter().flatten() {
+                collect_words(node, words);
+            }
+        }
+        Node::Optional(inner) => collect_words(inner, words),
+    }
+}
+
 /// Appends the regex for `node`; returns the slot name if it is not declared.
 fn emit(
     node: &Node,
@@ -406,6 +471,18 @@ mod tests {
     fn empty_input_matches_nothing() {
         let matcher = build("[a]\nphrases = [\"hello\"]").unwrap();
         assert_eq!(matcher.best("?!"), None);
+    }
+
+    #[test]
+    fn guess_points_unmatched_text_at_a_command() {
+        let config = Config::from_toml("[apps]\nfirefox = {}\n").unwrap();
+        let matcher = RuleMatcher::new(&PhraseSet::default_en().unwrap(), &config).unwrap();
+        assert_eq!(
+            matcher.guess("fire up firefox").as_deref(),
+            Some("open_app")
+        );
+        assert_eq!(matcher.guess("ring my sister").as_deref(), Some("call"));
+        assert_eq!(matcher.guess("quantum zebra").as_deref(), None);
     }
 
     #[test]

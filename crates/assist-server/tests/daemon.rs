@@ -11,7 +11,7 @@ use std::time::Duration;
 use assist_core::action::{Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest};
 use assist_core::audit::Audit;
 use assist_core::config::Config;
-use assist_core::dialog::{Engine, SHELL};
+use assist_core::dialog::{Engine, LiveEngine, SHELL};
 use assist_core::phrases::PhraseSet;
 use assist_core::policy::Capability;
 use assist_core::scheduler::{Persistence, Scheduler};
@@ -112,7 +112,7 @@ async fn start(name: &str) -> Daemon {
             redactor: Some(secrets.redactor()),
         },
     );
-    let engine = Arc::new(
+    let engine = Arc::new(LiveEngine::new(Arc::new(
         Engine::new(
             config,
             &PhraseSet::default_en().unwrap(),
@@ -120,7 +120,7 @@ async fn start(name: &str) -> Daemon {
             true,
         )
         .unwrap(),
-    );
+    )));
     let token = load_or_create_token(&dir).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -133,6 +133,7 @@ async fn start(name: &str) -> Daemon {
         secrets: Some(secrets),
         default_cwd: std::env::temp_dir(),
         data_dir: dir.clone(),
+        user_phrases: Some(dir.join("phrases").join("user.toml")),
     };
     tokio::spawn(serve(services, listener, async {
         let _ = stopped.await;
@@ -469,6 +470,92 @@ async fn another_client_answers_a_waiting_question() {
     assert!(none.is_empty());
     let again = call_raw(&mut dashboard, rpc::DIALOGS_ANSWER, answer).await;
     assert_eq!(again.error.unwrap().code, "not_found");
+}
+
+#[tokio::test]
+async fn unmatched_sentences_become_phrases() {
+    let daemon = start("misses").await;
+    let mut ws = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    for _ in 0..2 {
+        let text = Utterance {
+            text: "find me rust tokio".to_owned(),
+        };
+        send(&mut ws, Kind::Utterance, text).await;
+        let reply: Reply = recv(&mut ws).await.unwrap().body().unwrap();
+        assert!(reply.waiting, "unmatched input gets the shell offer");
+        send(
+            &mut ws,
+            Kind::Utterance,
+            Utterance {
+                text: "no".to_owned(),
+            },
+        )
+        .await;
+        recv(&mut ws).await.unwrap();
+    }
+
+    // Misses are written off the runtime; give them a moment.
+    let mut misses: Vec<rpc::Miss> = Vec::new();
+    for _ in 0..100 {
+        misses = call(&mut ws, rpc::MISSES_LIST, ()).await;
+        if misses.first().is_some_and(|m| m.count == 2) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(misses[0].text, "find me rust tokio");
+    assert_eq!(misses[0].count, 2);
+
+    let commands: Vec<rpc::CommandEntry> = call(&mut ws, rpc::COMMANDS_LIST, ()).await;
+    let search = commands.iter().find(|c| c.name == "search").unwrap();
+    assert_eq!(search.slots["query"], "text");
+    assert!(!search.available, "the test daemon only runs shell");
+
+    let bad = rpc::PhraseAdd {
+        command: "search".to_owned(),
+        phrase: "find me .nope.".to_owned(),
+        miss: None,
+    };
+    let refused = call_raw(&mut ws, rpc::PHRASES_ADD, bad).await;
+    assert_eq!(
+        refused.error.unwrap().code,
+        "bad_request",
+        "undeclared slot"
+    );
+
+    let add = rpc::PhraseAdd {
+        command: "search".to_owned(),
+        phrase: "find me .query.".to_owned(),
+        miss: Some(misses[0].text.clone()),
+    };
+    let added: bool = call(&mut ws, rpc::PHRASES_ADD, add).await;
+    assert!(added);
+    let file = daemon.dir.join("phrases").join("user.toml");
+    assert!(std::fs::read_to_string(file)
+        .unwrap()
+        .contains("find me .query."));
+
+    let explained: Option<Explanation> = call(
+        &mut ws,
+        rpc::COMMANDS_EXPLAIN,
+        rpc::Explain {
+            text: "find me rust tokio".to_owned(),
+        },
+    )
+    .await;
+    let explained = explained.expect("the new phrase matches at once");
+    assert_eq!(explained.slots["query"], "rust tokio");
+
+    let mut left = 1;
+    for _ in 0..100 {
+        let misses: Vec<rpc::Miss> = call(&mut ws, rpc::MISSES_LIST, ()).await;
+        left = misses.len();
+        if left == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(left, 0, "the miss is forgotten once it is a phrase");
 }
 
 #[tokio::test]

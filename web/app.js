@@ -190,6 +190,7 @@ function refresh(tab) {
     jobs: loadJobs,
     waiting: loadWaiting,
     secrets: loadSecrets,
+    commands: loadMisses,
     audit: loadAudit,
     clients: loadClients,
   };
@@ -331,6 +332,53 @@ $("explain-form").addEventListener("submit", async (event) => {
     out.textContent = err.message;
   }
 });
+
+async function loadMisses() {
+  const [misses, commands] = await Promise.all([rpc("misses.list"), rpc("commands.list")]);
+  const body = $("misses-body");
+  body.replaceChildren();
+  for (const miss of misses) {
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Command");
+    for (const command of commands) {
+      const option = el("option", command.name);
+      option.value = command.name;
+      option.selected = command.name === miss.guess;
+      select.append(option);
+    }
+    const phrase = el("input");
+    phrase.value = miss.text;
+    phrase.maxLength = 200;
+    phrase.setAttribute("aria-label", "Phrase");
+    const slots = el("div", "", "hint");
+    const showSlots = () => {
+      const command = commands.find((c) => c.name === select.value);
+      const names = command ? Object.keys(command.slots).map((s) => `.${s}.`) : [];
+      slots.textContent = names.length ? `slots: ${names.join(" ")}` : "no slots";
+    };
+    select.addEventListener("change", showSlots);
+    showSlots();
+    const add = button("Add phrase", async () => {
+      try {
+        await rpc("phrases.add", { command: select.value, phrase: phrase.value, miss: miss.text });
+        $("misses-note").textContent = `Added "${phrase.value}" to ${select.value}.`;
+        loadMisses();
+      } catch (err) {
+        $("misses-note").textContent = err.message;
+      }
+    });
+    const dismiss = button("Dismiss", async () => {
+      await rpc("misses.dismiss", { text: miss.text });
+      loadMisses();
+    });
+    const picker = document.createElement("span");
+    picker.append(select, slots);
+    const actions = document.createElement("span");
+    actions.append(add, " ", dismiss);
+    body.append(row([miss.text, miss.count, picker, phrase, actions]));
+  }
+  if (!misses.length) body.append(row(["Everything said recently was understood."]));
+}
 
 // --- audit ---
 

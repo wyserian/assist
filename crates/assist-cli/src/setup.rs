@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use assist_core::audit::Audit;
 use assist_core::config::Config;
-use assist_core::dialog::Engine;
+use assist_core::dialog::{Engine, LiveEngine};
 use assist_core::phrases::PhraseSet;
 use assist_core::scheduler::{Persistence, Scheduler};
 use assist_core::secrets::Secrets;
@@ -47,6 +47,14 @@ impl Paths {
     pub fn data(&self) -> &PathBuf {
         &self.data
     }
+
+    /// User phrase files, next to the config file; they extend or override the built-ins.
+    pub fn phrases_dir(&self) -> PathBuf {
+        self.config
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("phrases")
+    }
 }
 
 /// Everything a running assistant needs.
@@ -61,8 +69,9 @@ pub struct Assistant {
     pub store: Store,
     /// Runs jobs.
     pub scheduler: Scheduler,
-    /// Shared dialog state: matcher, policy, available commands.
-    pub engine: Arc<Engine>,
+    /// Shared dialog state: matcher, policy, available commands. Replaced when phrases are
+    /// added.
+    pub engine: Arc<LiveEngine>,
 }
 
 impl Assistant {
@@ -105,13 +114,14 @@ impl Assistant {
                 redactor: secrets.as_ref().map(|secrets| secrets.redactor()),
             },
         );
-        let phrases = PhraseSet::default_en()?;
-        let engine = Arc::new(Engine::new(
+        let mut phrases = PhraseSet::default_en()?;
+        phrases.extend(PhraseSet::load_dir(&paths.phrases_dir())?);
+        let engine = Arc::new(LiveEngine::new(Arc::new(Engine::new(
             Arc::clone(&config),
             &phrases,
             scheduler.commands(),
             true,
-        )?);
+        )?)));
         Ok(Self {
             config,
             secrets,

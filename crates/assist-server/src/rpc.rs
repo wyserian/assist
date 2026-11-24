@@ -1,10 +1,13 @@
 //! [`assist_proto::rpc`] methods. Blocking work (store, keystore) runs on `spawn_blocking`.
 
+use std::sync::Arc;
+
+use assist_core::phrases::add_user_phrase;
 use assist_core::policy::Trust;
 use assist_core::scheduler::JobInfo;
 use assist_proto::rpc::{
-    self, AuditPage, ClientRef, DialogAnswer, Explain, History, JobRef, Otp, SecretEntry,
-    SecretName, SecretSet,
+    self, AuditPage, ClientRef, CommandEntry, DialogAnswer, Explain, History, JobRef, Miss,
+    MissText, Otp, PhraseAdd, SecretEntry, SecretName, SecretSet,
 };
 use assist_proto::{Rpc, RpcResult};
 use serde::de::DeserializeOwned;
@@ -17,6 +20,10 @@ use crate::Credential;
 const TAIL_BYTES: u64 = 64 * 1024;
 /// Most jobs returned by one `jobs.history` call.
 const MAX_HISTORY: usize = 500;
+/// Unmatched sentences returned by `misses.list`.
+const MAX_MISSES: usize = 50;
+/// Longest phrase `phrases.add` accepts.
+const MAX_PHRASE: usize = 200;
 /// How long `dialogs.answer` waits for the other client to take the answer.
 const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -85,7 +92,12 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
         }
         rpc::COMMANDS_EXPLAIN => {
             let explain: Explain = parse(params)?;
-            RpcResult::ok(services.engine.explain(&conn.principal, &explain.text))
+            RpcResult::ok(
+                services
+                    .engine
+                    .get()
+                    .explain(&conn.principal, &explain.text),
+            )
         }
         rpc::CLIENTS_LIST => RpcResult::ok(conn.state.client_list()),
         rpc::CLIENTS_REVOKE => {
@@ -101,6 +113,77 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
                 .ok_or_else(|| RpcResult::err("unavailable", "this daemon has no audit log"))?;
             let limit = page.limit.unwrap_or(100).min(MAX_HISTORY);
             RpcResult::ok(blocking(move || audit.tail(limit)).await?)
+        }
+        rpc::MISSES_LIST => {
+            let store = services.store.clone();
+            let rows = blocking(move || store.misses(MAX_MISSES)).await?;
+            let engine = services.engine.get();
+            let misses: Vec<Miss> = rows
+                .into_iter()
+                .map(|(text, count, last)| Miss {
+                    guess: engine.guess(&text),
+                    text,
+                    count,
+                    last,
+                })
+                .collect();
+            RpcResult::ok(misses)
+        }
+        rpc::MISSES_DISMISS => {
+            let miss: MissText = parse(params)?;
+            services.store.forget_miss(&miss.text);
+            RpcResult::ok(true)
+        }
+        rpc::COMMANDS_LIST => {
+            let engine = services.engine.get();
+            let commands: Vec<CommandEntry> = engine
+                .phrases()
+                .commands()
+                .map(|(name, spec)| CommandEntry {
+                    name: name.to_owned(),
+                    slots: spec.slots.clone(),
+                    available: engine.available(name),
+                })
+                .collect();
+            RpcResult::ok(commands)
+        }
+        rpc::PHRASES_ADD => {
+            require_local(conn)?;
+            let add: PhraseAdd = parse(params)?;
+            let phrase = add.phrase.trim().to_owned();
+            if phrase.is_empty() || phrase.len() > MAX_PHRASE {
+                return Err(RpcResult::err(
+                    "bad_request",
+                    format!("a phrase is 1 to {MAX_PHRASE} characters"),
+                ));
+            }
+            let file = services.user_phrases.clone().ok_or_else(|| {
+                RpcResult::err("unavailable", "this daemon has no user phrase file")
+            })?;
+            let engine = services.engine.get();
+            let not_found = || RpcResult::err("not_found", format!("no command {}", add.command));
+            let spec = engine
+                .phrases()
+                .spec(&add.command)
+                .cloned()
+                .ok_or_else(not_found)?;
+            let phrases = engine
+                .phrases()
+                .with_phrase(&add.command, &phrase)
+                .ok_or_else(not_found)?;
+            // Compiled before writing, so a broken phrase never reaches the file.
+            let updated = engine
+                .with_phrases(&phrases)
+                .map_err(|err| RpcResult::err("bad_request", err.to_string()))?;
+            let command = add.command.clone();
+            blocking(move || add_user_phrase(&file, &command, &spec, &phrase)).await?;
+            // shortcut: two dashboards adding at the same moment can drop one reload (both
+            // read the same engine); the phrase is still in the file and loads on restart.
+            services.engine.set(Arc::new(updated));
+            if let Some(miss) = add.miss {
+                services.store.forget_miss(&miss);
+            }
+            RpcResult::ok(true)
         }
         rpc::DIALOGS_PENDING => RpcResult::ok(conn.state.waiting()),
         rpc::DIALOGS_ANSWER => {
