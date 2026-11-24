@@ -41,6 +41,7 @@ pub async fn run(paths: Paths) -> Result<()> {
         default_cwd: std::env::current_dir()?,
         data_dir: paths.data().clone(),
         user_phrases: Some(paths.phrases_dir().join("user.toml")),
+        config_file: Some(paths.config_file().clone()),
     };
     let result = serve(services, listener, async {
         let _ = tokio::signal::ctrl_c().await;

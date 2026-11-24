@@ -134,6 +134,7 @@ async fn start(name: &str) -> Daemon {
         default_cwd: std::env::temp_dir(),
         data_dir: dir.clone(),
         user_phrases: Some(dir.join("phrases").join("user.toml")),
+        config_file: Some(dir.join("config.toml")),
     };
     tokio::spawn(serve(services, listener, async {
         let _ = stopped.await;
@@ -556,6 +557,70 @@ async fn unmatched_sentences_become_phrases() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert_eq!(left, 0, "the miss is forgotten once it is a phrase");
+}
+
+#[tokio::test]
+async fn settings_are_saved_and_risky_applies_at_once() {
+    let daemon = start("settings").await;
+    let mut ws = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    let settings: rpc::Settings = call(&mut ws, rpc::SETTINGS_GET, ()).await;
+    assert_eq!(settings.lanes_interactive, 2);
+    assert!(!settings.restart_pending);
+    assert!(settings
+        .commands
+        .iter()
+        .any(|c| c.name == "shell" && !c.risky));
+
+    let set = |key: &str, value: serde_json::Value| rpc::SettingChange {
+        key: key.to_owned(),
+        value,
+    };
+    let result: rpc::SettingResult = call(
+        &mut ws,
+        rpc::SETTINGS_SET,
+        set("commands.shell.risky", serde_json::json!(true)),
+    )
+    .await;
+    assert!(!result.restart_needed);
+
+    // Risky applies to the very next request.
+    let text = Utterance {
+        text: "$ echo hi".to_owned(),
+    };
+    send(&mut ws, Kind::Utterance, text).await;
+    let reply: Reply = recv(&mut ws).await.unwrap().body().unwrap();
+    assert!(reply.waiting, "typed shell now asks first: {reply:?}");
+    assert!(reply.jobs.is_empty());
+
+    let result: rpc::SettingResult = call(
+        &mut ws,
+        rpc::SETTINGS_SET,
+        set("lanes.interactive", serde_json::json!(4)),
+    )
+    .await;
+    assert!(result.restart_needed);
+    let settings: rpc::Settings = call(&mut ws, rpc::SETTINGS_GET, ()).await;
+    assert_eq!(settings.lanes_interactive, 4);
+    assert!(settings.restart_pending);
+
+    for (key, value) in [
+        ("commands.sned_sms.risky", serde_json::json!(true)),
+        ("server.bind", serde_json::json!("0.0.0.0:1")),
+        ("lanes.interactive", serde_json::json!(0)),
+        ("lanes.interactive", serde_json::json!([1])),
+    ] {
+        let refused = call_raw(&mut ws, rpc::SETTINGS_SET, set(key, value)).await;
+        assert_eq!(refused.error.unwrap().code, "bad_request", "{key}");
+    }
+    let saved = std::fs::read_to_string(daemon.dir.join("config.toml")).unwrap();
+    assert!(
+        saved.contains("interactive = 4") && saved.contains("risky = true"),
+        "{saved}"
+    );
+    assert!(
+        !saved.contains("sned_sms"),
+        "refused changes are not written"
+    );
 }
 
 #[tokio::test]

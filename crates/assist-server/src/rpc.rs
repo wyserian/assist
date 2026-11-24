@@ -1,13 +1,18 @@
 //! [`assist_proto::rpc`] methods. Blocking work (store, keystore) runs on `spawn_blocking`.
 
+use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use assist_core::config::{edit, setting_applies, Applies, SettingValue};
+use assist_core::dialog::SHELL;
 use assist_core::phrases::add_user_phrase;
 use assist_core::policy::Trust;
 use assist_core::scheduler::JobInfo;
 use assist_proto::rpc::{
-    self, AuditPage, ClientRef, CommandEntry, DialogAnswer, Explain, History, JobRef, Miss,
-    MissText, Otp, PhraseAdd, SecretEntry, SecretName, SecretSet,
+    self, AuditPage, ClientRef, CommandEntry, CommandSetting, DialogAnswer, Explain, History,
+    JobRef, Miss, MissText, Otp, PhraseAdd, SecretEntry, SecretName, SecretSet, SettingChange,
+    SettingResult, Settings,
 };
 use assist_proto::{Rpc, RpcResult};
 use serde::de::DeserializeOwned;
@@ -185,6 +190,84 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
             }
             RpcResult::ok(true)
         }
+        rpc::SETTINGS_GET => {
+            let engine = services.engine.get();
+            let config = engine.config();
+            let mut names: Vec<String> = engine
+                .phrases()
+                .commands()
+                .map(|(name, _)| name.to_owned())
+                .collect();
+            names.push(SHELL.to_owned());
+            names.sort();
+            let commands = names
+                .into_iter()
+                .map(|name| CommandSetting {
+                    risky: config.commands.get(&name).is_some_and(|c| c.risky),
+                    name,
+                })
+                .collect();
+            RpcResult::ok(Settings {
+                commands,
+                lanes_interactive: config.lanes.interactive,
+                lanes_background: config.lanes.background,
+                jobs_timeout: format!("{}s", config.jobs.timeout.as_secs()),
+                output_tail_kb: config.jobs.output_tail_kb,
+                retention_days: config.jobs.retention_days,
+                log_cap_mb: config.jobs.log_cap_mb,
+                search_url: config.search.url.clone(),
+                restart_pending: conn.state.restart_pending.load(Ordering::Relaxed),
+            })
+        }
+        rpc::SETTINGS_SET => {
+            require_local(conn)?;
+            let change: SettingChange = parse(params)?;
+            let value = match change.value {
+                Value::Bool(b) => SettingValue::Bool(b),
+                Value::Number(n) => SettingValue::Int(
+                    n.as_i64()
+                        .ok_or_else(|| RpcResult::err("bad_request", "numbers must be whole"))?,
+                ),
+                Value::String(text) => SettingValue::Text(text),
+                _ => {
+                    return Err(RpcResult::err(
+                        "bad_request",
+                        "use true/false, a number or text",
+                    ))
+                }
+            };
+            let applies = setting_applies(&change.key).ok_or_else(|| {
+                RpcResult::err(
+                    "bad_request",
+                    format!("{} cannot be changed here", change.key),
+                )
+            })?;
+            let file = services
+                .config_file
+                .clone()
+                .ok_or_else(|| RpcResult::err("unavailable", "this daemon has no config file"))?;
+            let read = file.clone();
+            let src = blocking(move || match std::fs::read_to_string(&read) {
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+                other => other,
+            })
+            .await?;
+            let (text, config) = edit(&src, &change.key, value)
+                .map_err(|err| RpcResult::err("bad_request", err.to_string()))?;
+            // Built before writing: a config naming an unknown command is refused here.
+            let engine = services
+                .engine
+                .get()
+                .with_config(Arc::new(config))
+                .map_err(|err| RpcResult::err("bad_request", err.to_string()))?;
+            blocking(move || write_atomically(&file, &text)).await?;
+            services.engine.set(Arc::new(engine));
+            let restart_needed = applies == Applies::AfterRestart;
+            if restart_needed {
+                conn.state.restart_pending.store(true, Ordering::Relaxed);
+            }
+            RpcResult::ok(SettingResult { restart_needed })
+        }
         rpc::DIALOGS_PENDING => RpcResult::ok(conn.state.waiting()),
         rpc::DIALOGS_ANSWER => {
             // A local user on the dashboard may answer any client's question (PLAN.md 3.5).
@@ -231,6 +314,13 @@ fn require_local(conn: &Conn) -> Result<(), RpcResult> {
     } else {
         Err(RpcResult::err("denied", "only local clients can do this"))
     }
+}
+
+/// Replaces `file` with `text` via a temporary file, so a crash never leaves it half written.
+fn write_atomically(file: &Path, text: &str) -> std::io::Result<()> {
+    let tmp = file.with_extension("toml.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, file)
 }
 
 fn no_secrets() -> RpcResult {

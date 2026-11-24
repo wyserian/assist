@@ -271,6 +271,83 @@ impl Config {
     }
 }
 
+/// A value for [`edit`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingValue {
+    /// `true` / `false`.
+    Bool(bool),
+    /// A whole number.
+    Int(i64),
+    /// A string, e.g. `"10m"` or a URL.
+    Text(String),
+}
+
+/// Whether a setting applies at once or only after the daemon restarts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applies {
+    /// Read on every request: `commands.<name>.risky`.
+    Now,
+    /// Read when the scheduler and actions start: lanes, job limits, search URL.
+    AfterRestart,
+}
+
+/// The keys [`edit`] may change, and when each applies.
+pub fn setting_applies(key: &str) -> Option<Applies> {
+    let mut parts = key.split('.');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("commands"), Some(name), Some("risky"), None) if !name.is_empty() => {
+            Some(Applies::Now)
+        }
+        (Some("lanes"), Some("interactive" | "background"), None, None)
+        | (
+            Some("jobs"),
+            Some("timeout" | "output_tail_kb" | "retention_days" | "log_cap_mb"),
+            None,
+            None,
+        )
+        | (Some("search"), Some("url"), None, None) => Some(Applies::AfterRestart),
+        _ => None,
+    }
+}
+
+/// Sets one allowed `key` (see [`setting_applies`]) in config text `src`, keeping comments and
+/// layout. Returns the new text and the parsed config, which passed every check; nothing is
+/// written.
+pub fn edit(src: &str, key: &str, value: SettingValue) -> Result<(String, Config), ConfigError> {
+    if setting_applies(key).is_none() {
+        return Err(ConfigError::Invalid(format!(
+            "{key} cannot be changed here"
+        )));
+    }
+    let mut doc: toml_edit::DocumentMut = src.parse().map_err(|err: toml_edit::TomlError| {
+        ConfigError::Invalid(format!("config is not valid TOML: {}", err.message()))
+    })?;
+    let value = match value {
+        SettingValue::Bool(b) => toml_edit::value(b),
+        SettingValue::Int(n) => toml_edit::value(n),
+        SettingValue::Text(text) => toml_edit::value(text),
+    };
+    let mut parts: Vec<&str> = key.split('.').collect();
+    let Some(last) = parts.pop() else {
+        return Err(ConfigError::Invalid(format!(
+            "{key} cannot be changed here"
+        )));
+    };
+    let mut table = doc.as_table_mut();
+    for part in parts {
+        let entry = table
+            .entry(part)
+            .or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()));
+        table = entry
+            .as_table_mut()
+            .ok_or_else(|| ConfigError::Invalid(format!("{part} in the config is not a table")))?;
+    }
+    table.insert(last, value);
+    let text = doc.to_string();
+    let config = Config::from_toml(&text)?;
+    Ok((text, config))
+}
+
 /// 1-based line and column of a TOML error in `src`.
 pub(crate) fn location(src: &str, err: &toml::de::Error) -> (usize, usize) {
     let offset = err.span().map_or(0, |span| span.start);
@@ -322,6 +399,37 @@ mod tests {
                 }
             ),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn edit_keeps_comments_and_validates() {
+        let src = "# mine\n[lanes]\ninteractive = 2 # quick jobs\n";
+        let (text, config) = edit(src, "lanes.interactive", SettingValue::Int(4)).unwrap();
+        assert_eq!(config.lanes.interactive, 4);
+        assert!(text.contains("# mine"), "{text}");
+
+        let (text, config) =
+            edit(&text, "commands.send_sms.risky", SettingValue::Bool(false)).unwrap();
+        assert!(!config.commands["send_sms"].risky);
+        assert!(text.contains("[commands.send_sms]"), "{text}");
+
+        let (_, config) = edit("", "jobs.timeout", SettingValue::Text("90s".into())).unwrap();
+        assert_eq!(config.jobs.timeout, Duration::from_secs(90));
+
+        for (key, value) in [
+            ("lanes.interactive", SettingValue::Int(0)),
+            ("jobs.timeout", SettingValue::Text("soon".into())),
+            ("search.url", SettingValue::Text("file:///x?{query}".into())),
+            ("server.bind", SettingValue::Text("0.0.0.0:1".into())),
+            ("apps.evil", SettingValue::Text("x".into())),
+        ] {
+            assert!(edit(src, key, value).is_err(), "{key} must be refused");
+        }
+        assert_eq!(setting_applies("commands.call.risky"), Some(Applies::Now));
+        assert_eq!(
+            setting_applies("lanes.background"),
+            Some(Applies::AfterRestart)
         );
     }
 

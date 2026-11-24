@@ -191,6 +191,7 @@ function refresh(tab) {
     waiting: loadWaiting,
     secrets: loadSecrets,
     commands: loadMisses,
+    settings: loadSettings,
     audit: loadAudit,
     clients: loadClients,
   };
@@ -378,6 +379,63 @@ async function loadMisses() {
     body.append(row([miss.text, miss.count, picker, phrase, actions]));
   }
   if (!misses.length) body.append(row(["Everything said recently was understood."]));
+}
+
+// --- settings ---
+
+async function saveSetting(key, value) {
+  const note = $("settings-note");
+  try {
+    const result = await rpc("settings.set", { key, value });
+    note.textContent = result.restart_needed
+      ? `Saved ${key}. Restart the daemon to apply it.`
+      : `Saved ${key}. It applies now.`;
+  } catch (err) {
+    note.textContent = err.message;
+  }
+  loadSettings();
+}
+
+async function loadSettings() {
+  const settings = await rpc("settings.get");
+  if (settings.restart_pending && !$("settings-note").textContent) {
+    $("settings-note").textContent = "Some saved settings apply after the daemon restarts.";
+  }
+  const commands = $("settings-commands");
+  commands.replaceChildren();
+  for (const command of settings.commands) {
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = command.risky;
+    box.setAttribute("aria-label", `Ask before ${command.name}`);
+    box.addEventListener("change", () => saveSetting(`commands.${command.name}.risky`, box.checked));
+    commands.append(row([command.name, box]));
+  }
+  const fields = [
+    ["lanes.interactive", "Quick jobs at once", settings.lanes_interactive, "number"],
+    ["lanes.background", "Long jobs at once", settings.lanes_background, "number"],
+    ["jobs.timeout", "Stop a job after (30s, 10m, 2h)", settings.jobs_timeout, "text"],
+    ["jobs.output_tail_kb", "Output kept per job (KB)", settings.output_tail_kb, "number"],
+    ["jobs.retention_days", "Keep job history (days)", settings.retention_days, "number"],
+    ["jobs.log_cap_mb", "All job logs at most (MB)", settings.log_cap_mb, "number"],
+    ["search.url", "Search URL ({query} is replaced)", settings.search_url, "text"],
+  ];
+  const values = $("settings-values");
+  values.replaceChildren();
+  for (const [key, label, current, type] of fields) {
+    const input = el("input");
+    input.type = type;
+    input.value = current;
+    input.setAttribute("aria-label", label);
+    if (type === "number") input.min = "0";
+    const save = button("Save", () => {
+      const value = type === "number" ? Number(input.value) : input.value.trim();
+      saveSetting(key, value);
+    });
+    const cell = document.createElement("span");
+    cell.append(input, " ", save);
+    values.append(row([label, cell]));
+  }
 }
 
 // --- audit ---

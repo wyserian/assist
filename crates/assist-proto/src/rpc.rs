@@ -85,6 +85,62 @@ pub struct CommandEntry {
     pub available: bool,
 }
 
+/// The editable settings. Result: [`Settings`].
+pub const SETTINGS_GET: &str = "settings.get";
+/// Changes one setting in the config file. Params: [`SettingChange`]. Result:
+/// [`SettingResult`].
+pub const SETTINGS_SET: &str = "settings.set";
+
+/// The settings the dashboard can change, as saved in the config file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Settings {
+    /// Commands and whether each always asks for confirmation.
+    pub commands: Vec<CommandSetting>,
+    /// Concurrent quick jobs.
+    pub lanes_interactive: usize,
+    /// Concurrent long jobs.
+    pub lanes_background: usize,
+    /// Job timeout, e.g. `600s`.
+    pub jobs_timeout: String,
+    /// Output kept in memory per job, KB.
+    pub output_tail_kb: usize,
+    /// Days job history is kept.
+    pub retention_days: u64,
+    /// Size cap of all job logs, MB.
+    pub log_cap_mb: u64,
+    /// Search URL with `{query}`.
+    pub search_url: String,
+    /// A setting changed that needs a daemon restart.
+    pub restart_pending: bool,
+}
+
+/// One command's confirmation setting.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandSetting {
+    /// Command name.
+    pub name: String,
+    /// `risky = true`: always read back and confirm.
+    pub risky: bool,
+}
+
+/// One setting to change: `commands.<name>.risky`, `lanes.interactive`,
+/// `lanes.background`, `jobs.timeout`, `jobs.output_tail_kb`, `jobs.retention_days`,
+/// `jobs.log_cap_mb` or `search.url`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingChange {
+    /// Dotted key.
+    pub key: String,
+    /// A boolean, whole number or string.
+    pub value: serde_json::Value,
+}
+
+/// What a setting change did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingResult {
+    /// Saved, but takes effect only after the daemon restarts.
+    pub restart_needed: bool,
+}
+
 /// Questions clients are waiting on. Result: `Vec<Waiting>`.
 pub const DIALOGS_PENDING: &str = "dialogs.pending";
 /// Answers another client's question as that client. Params: [`DialogAnswer`]. Result:

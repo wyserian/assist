@@ -55,6 +55,8 @@ pub struct Services {
     pub engine: Arc<LiveEngine>,
     /// The user phrase file that `phrases.add` writes to.
     pub user_phrases: Option<PathBuf>,
+    /// The config file that `settings.set` edits.
+    pub config_file: Option<PathBuf>,
     /// Job history.
     pub store: Store,
     /// Audit log, for the dashboard.
@@ -81,6 +83,7 @@ pub async fn serve(
         auth,
         port,
         clients: Mutex::new(BTreeMap::new()),
+        restart_pending: std::sync::atomic::AtomicBool::new(false),
         next_client: AtomicU64::new(1),
         stop: stop.clone(),
     }));
@@ -116,6 +119,8 @@ pub(crate) struct Shared {
     pub(crate) auth: Auth,
     port: u16,
     clients: Mutex<BTreeMap<u64, Client>>,
+    /// A saved setting waits for a daemon restart.
+    pub(crate) restart_pending: std::sync::atomic::AtomicBool,
     next_client: AtomicU64,
     stop: CancellationToken,
 }

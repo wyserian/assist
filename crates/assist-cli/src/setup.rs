@@ -48,6 +48,11 @@ impl Paths {
         &self.data
     }
 
+    /// The config file.
+    pub fn config_file(&self) -> &PathBuf {
+        &self.config
+    }
+
     /// User phrase files, next to the config file; they extend or override the built-ins.
     pub fn phrases_dir(&self) -> PathBuf {
         self.config

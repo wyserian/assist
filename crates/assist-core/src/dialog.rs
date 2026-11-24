@@ -123,6 +123,17 @@ impl Engine {
         )
     }
 
+    /// The same engine with another config, e.g. after a setting changed. Fails if the
+    /// config names unknown commands.
+    pub fn with_config(&self, config: Arc<Config>) -> Result<Self, EngineError> {
+        Self::new(
+            config,
+            &self.phrases,
+            self.commands.clone(),
+            self.offer_shell,
+        )
+    }
+
     /// The config the engine was built from.
     pub fn config(&self) -> &Config {
         &self.config
