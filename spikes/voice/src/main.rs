@@ -404,6 +404,51 @@ fn hotwords(dir: &str, words: &BTreeSet<String>) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
+/// sentencepiece vocab for sherpa's own hotword tokenizer: tokens.txt is in sentencepiece id
+/// order, and a BPE piece's score is minus its id.
+fn bpe_vocab(dir: &str) -> Result<String> {
+    let src = std::fs::read_to_string(root().join("models").join(dir).join("tokens.txt"))?;
+    let path = root().join("models").join(format!("{dir}.bpe.vocab"));
+    let lines: Vec<String> = src
+        .lines()
+        .filter_map(|l| l.rsplit_once(' '))
+        .map(|(t, id)| format!("{t}	-{id}"))
+        .collect();
+    std::fs::write(&path, lines.join("
+"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Hotwords as plain words, lower-case and capitalised, one per line.
+fn plain_hotwords(words: &BTreeSet<String>) -> String {
+    let mut out = Vec::new();
+    for w in words.iter().filter(|w| w.len() > 2) {
+        out.push(w.to_lowercase());
+        let mut c = w.chars();
+        if let Some(f) = c.next() {
+            out.push(f.to_uppercase().chain(c).collect());
+        }
+    }
+    out.join("
+")
+}
+
+fn kroko_bpe(words: &BTreeSet<String>, score: f32) -> Result<Box<dyn Engine>> {
+    let mut c = so::OnlineRecognizerConfig::default();
+    c.model_config.transducer.encoder = model(&format!("{KROKO}/encoder.onnx"));
+    c.model_config.transducer.decoder = model(&format!("{KROKO}/decoder.onnx"));
+    c.model_config.transducer.joiner = model(&format!("{KROKO}/joiner.onnx"));
+    c.model_config.tokens = model(&format!("{KROKO}/tokens.txt"));
+    c.model_config.num_threads = THREADS;
+    c.model_config.modeling_unit = Some("bpe".into());
+    c.model_config.bpe_vocab = Some(bpe_vocab(KROKO)?);
+    c.decoding_method = Some("modified_beam_search".into());
+    c.max_active_paths = 4;
+    c.hotwords_score = score;
+    let recognizer = so::OnlineRecognizer::create(&c).context("create online recognizer")?;
+    Ok(Box::new(Online { recognizer, hotwords: Some(plain_hotwords(words)) }))
+}
+
 fn online(dir: &str, encoder: &str, decoder: &str, joiner: &str, hot: Option<String>) -> Result<Box<dyn Engine>> {
     let mut c = so::OnlineRecognizerConfig::default();
     c.model_config.transducer.encoder = model(&format!("{dir}/{encoder}"));
@@ -433,6 +478,9 @@ fn load(name: &str, words: &BTreeSet<String>) -> Result<Box<dyn Engine>> {
         "A kroko +hot" => {
             online(KROKO, "encoder.onnx", "decoder.onnx", "joiner.onnx", Some(hotwords(KROKO, words)?))
         }
+        "A kroko beam" => kroko_bpe(words, 0.0),
+        "A kroko bpe1.5" => kroko_bpe(words, 1.5),
+        "A kroko bpe3" => kroko_bpe(words, 3.0),
         "B 20M" => online(SMALL, "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx", "joiner-epoch-99-avg-1.int8.onnx", None),
         "B 20M +hot" => online(
             SMALL,
@@ -472,6 +520,9 @@ fn load(name: &str, words: &BTreeSet<String>) -> Result<Box<dyn Engine>> {
 const ENGINES: &[&str] = &[
     "A kroko",
     "A kroko +hot",
+    "A kroko beam",
+    "A kroko bpe1.5",
+    "A kroko bpe3",
     "B 20M",
     "B 20M +hot",
     "C moonshine",

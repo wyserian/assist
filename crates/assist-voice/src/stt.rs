@@ -37,7 +37,10 @@ impl Recognizer {
         config.model_config.transducer.joiner = file("joiner.onnx")?;
         config.model_config.tokens = file("tokens.txt")?;
         config.model_config.num_threads = THREADS;
-        config.decoding_method = Some("greedy_search".into());
+        // Beam search cut word errors on the owner's clips from 30% to 22% at the same
+        // latency; hotwords on top gave nothing (PLAN.md section 13, 2026-11-24).
+        config.decoding_method = Some("modified_beam_search".into());
+        config.max_active_paths = 4;
         let inner =
             so::OnlineRecognizer::create(&config).ok_or(VoiceError::Engine("speech recognizer"))?;
         Ok(Self { inner })
