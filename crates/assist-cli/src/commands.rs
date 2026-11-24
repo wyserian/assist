@@ -91,6 +91,22 @@ pub async fn facts(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
+/// Pauses (`pause`) or resumes a job's pipe.
+pub async fn hold(paths: &Paths, target: &str, pause: bool) -> Result<()> {
+    let Ok(id) = target.trim_start_matches('#').parse::<u64>() else {
+        bail!("give a job id");
+    };
+    let mut client = Client::connect(paths.data(), false).await?;
+    let method = if pause {
+        rpc::JOBS_PAUSE
+    } else {
+        rpc::JOBS_RESUME
+    };
+    let _: bool = client.call(method, JobRef { id }).await?;
+    println!("{} #{id}.", if pause { "Paused" } else { "Resumed" });
+    Ok(())
+}
+
 /// Stops one job (`<id>`) or every job (`all`).
 pub async fn stop(paths: &Paths, target: &str) -> Result<()> {
     let mut client = Client::connect(paths.data(), false).await?;

@@ -12,8 +12,12 @@ pub fn printable(text: &str) -> String {
 
 /// One row of a job listing.
 pub fn job_row(job: &JobSummary) -> String {
+    let usage = match (job.cpu, job.memory) {
+        (Some(cpu), Some(memory)) => format!("{cpu:>3}% {:>5} MB  ", memory / (1024 * 1024)),
+        _ => String::new(),
+    };
     format!(
-        "#{:<4} {:<11} {:<12} {}",
+        "#{:<4} {:<11} {:<12} {usage}{}",
         job.id,
         job.state.as_str(),
         job.lane.as_str(),
@@ -30,7 +34,7 @@ pub fn output_line(id: u64, error: bool, text: &str) -> String {
 /// The line for a job that ended; `None` while it is queued or running.
 pub fn ended_line(id: u64, state: JobState, error: Option<&str>) -> Option<String> {
     let text = match state {
-        JobState::Queued | JobState::Running => return None,
+        JobState::Queued | JobState::Running | JobState::Paused => return None,
         JobState::Failed => match error {
             Some(reason) => format!("failed: {}", printable(reason)),
             None => "failed".to_owned(),

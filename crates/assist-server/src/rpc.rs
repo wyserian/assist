@@ -15,7 +15,7 @@ use assist_proto::rpc::{
     JobRef, Miss, MissText, Otp, PhraseAdd, SecretEntry, SecretName, SecretSet, SettingChange,
     SettingResult, Settings,
 };
-use assist_proto::{Rpc, RpcResult};
+use assist_proto::{JobState, Rpc, RpcResult};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -45,7 +45,22 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
     let scheduler = &services.scheduler;
     Ok(match method {
         rpc::JOBS_LIST => {
-            let jobs: Vec<_> = scheduler.list().iter().map(JobInfo::summary).collect();
+            let mut jobs: Vec<_> = scheduler.list().iter().map(JobInfo::summary).collect();
+            let active: Vec<u64> = jobs
+                .iter()
+                .filter(|j| matches!(j.state, JobState::Running | JobState::Paused))
+                .map(|j| j.id)
+                .collect();
+            if !active.is_empty() {
+                let measure = scheduler.clone();
+                let usage = blocking(move || Ok::<_, String>(measure.usage(&active))).await?;
+                for job in &mut jobs {
+                    if let Some(used) = usage.get(&job.id) {
+                        job.cpu = Some(used.cpu);
+                        job.memory = Some(used.memory);
+                    }
+                }
+            }
             RpcResult::ok(jobs)
         }
         rpc::JOBS_HISTORY => {
@@ -68,6 +83,16 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
         rpc::JOBS_STOP => {
             let job: JobRef = parse(params)?;
             RpcResult::ok(scheduler.cancel(job.id))
+        }
+        rpc::JOBS_PAUSE | rpc::JOBS_RESUME => {
+            let job: JobRef = parse(params)?;
+            let done = if method == rpc::JOBS_PAUSE {
+                scheduler.pause(job.id)
+            } else {
+                scheduler.resume(job.id)
+            };
+            done.map_err(|err| RpcResult::err("failed", err.to_string()))?;
+            RpcResult::ok(true)
         }
         rpc::JOBS_STOP_ALL => RpcResult::ok(scheduler.cancel_all()),
         rpc::SECRETS_LIST => {

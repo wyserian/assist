@@ -11,6 +11,8 @@ pub mod apps;
 pub mod facts;
 #[cfg(feature = "shell")]
 mod process;
+#[cfg(feature = "processes")]
+pub mod processes;
 #[cfg(feature = "record")]
 pub mod record;
 #[cfg(feature = "rename")]
@@ -117,7 +119,10 @@ pub(crate) mod testing {
         let result = action.run(ctx, input, out).await;
         let mut chunks = Vec::new();
         while let Ok(chunk) = output.try_recv() {
-            chunks.push(chunk);
+            // Process ids are for the scheduler, never shown.
+            if !matches!(chunk, Chunk::Process(_)) {
+                chunks.push(chunk);
+            }
         }
         (result, chunks)
     }

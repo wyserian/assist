@@ -12,6 +12,11 @@ pub const JOBS_HISTORY: &str = "jobs.history";
 pub const JOBS_TAIL: &str = "jobs.tail";
 /// Stops a job. Params: [`JobRef`]. Result: `bool` (false if it had already ended).
 pub const JOBS_STOP: &str = "jobs.stop";
+/// Pauses a job's pipe. Params: [`JobRef`]. Result: `bool` (true when paused). Errors say
+/// why not (ended, runs no process).
+pub const JOBS_PAUSE: &str = "jobs.pause";
+/// Resumes a paused pipe. Params: [`JobRef`]. Result: `bool`.
+pub const JOBS_RESUME: &str = "jobs.resume";
 /// Stops every job. Result: `usize`, how many.
 pub const JOBS_STOP_ALL: &str = "jobs.stop_all";
 /// Secret metadata. Result: `Vec<SecretEntry>`.

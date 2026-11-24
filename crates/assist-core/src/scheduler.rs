@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use tokio::sync::{broadcast, mpsc, Semaphore};
+use tokio::sync::{broadcast, mpsc, watch, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -34,6 +34,8 @@ pub const KEEP_FINISHED: usize = 100;
 const OUTPUT_BUFFER: usize = 256;
 /// Lines waiting between two pipe stages; a full buffer makes the earlier stage wait.
 const PIPE_BUFFER: usize = 256;
+/// Processes recorded per job; an action starts one, a few at most.
+const MAX_PIDS: usize = 8;
 /// Pause before a failed pipe runs again.
 const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 const EVENT_BUFFER: usize = 1024;
@@ -82,6 +84,8 @@ impl JobInfo {
             finished: self.finished,
             error: self.error.as_ref().map(|e| e.message.clone()),
             group: self.group,
+            cpu: None,
+            memory: None,
         }
     }
 }
@@ -97,6 +101,54 @@ pub struct Persistence {
     pub redactor: Option<Redactor>,
     /// Data directory handed to actions (undo records).
     pub data_dir: Option<PathBuf>,
+    /// Pauses and measures job processes; without it, running jobs cannot be paused.
+    pub processes: Option<Arc<dyn Processes>>,
+}
+
+/// What a job's processes use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Usage {
+    /// CPU in whole percent of the machine.
+    pub cpu: u32,
+    /// Resident memory in bytes.
+    pub memory: u64,
+}
+
+/// Pauses, resumes and measures processes together with their descendants: the OS side of
+/// job control (PLAN.md section 3.8), implemented outside core.
+pub trait Processes: Send + Sync {
+    /// Suspends the processes and their descendants.
+    fn suspend(&self, roots: &[u32]) -> Result<(), String>;
+    /// Resumes the processes and their descendants.
+    fn resume(&self, roots: &[u32]) -> Result<(), String>;
+    /// Use per group of root processes, in order; `None` for a group that has ended.
+    /// Blocking: CPU is sampled over a short interval.
+    fn usage(&self, groups: &[Vec<u32>]) -> Vec<Option<Usage>>;
+}
+
+impl std::fmt::Debug for dyn Processes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Processes")
+    }
+}
+
+/// Why a job could not be paused or resumed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PauseError {
+    /// No such job, or it has ended.
+    #[error("no active job #{0}")]
+    NotActive(JobId),
+    /// It runs inside assist (no process to suspend).
+    #[error("#{0} cannot be paused: it runs no process")]
+    NoProcess(JobId),
+    /// The OS refused.
+    #[error("#{id}: {reason}")]
+    Os {
+        /// The job.
+        id: JobId,
+        /// What the OS said.
+        reason: String,
+    },
 }
 
 /// Something that happened to a job.
@@ -183,6 +235,7 @@ struct Inner {
     store: Option<Store>,
     redactor: Option<Redactor>,
     data_dir: Option<PathBuf>,
+    processes: Option<Arc<dyn Processes>>,
 }
 
 struct Slot {
@@ -191,6 +244,10 @@ struct Slot {
     /// The last output lines, at most `[jobs] output_tail_kb` in total.
     tail: VecDeque<String>,
     tail_bytes: usize,
+    /// Processes the action started.
+    pids: Vec<u32>,
+    /// True while the user holds the job's pipe; shared by its stages.
+    hold: Arc<watch::Sender<bool>>,
 }
 
 impl Scheduler {
@@ -228,6 +285,7 @@ impl Scheduler {
                 store: persistence.store,
                 redactor: persistence.redactor,
                 data_dir: persistence.data_dir,
+                processes: persistence.processes,
             }),
         }
     }
@@ -349,6 +407,95 @@ impl Scheduler {
             .count()
     }
 
+    /// Pauses the pipe `id` belongs to: running stages' processes are suspended, queued
+    /// stages wait. Pausing a paused pipe is fine.
+    pub fn pause(&self, id: JobId) -> Result<(), PauseError> {
+        self.hold(id, true)
+    }
+
+    /// Resumes a paused pipe.
+    pub fn resume(&self, id: JobId) -> Result<(), PauseError> {
+        self.hold(id, false)
+    }
+
+    fn hold(&self, id: JobId, pause: bool) -> Result<(), PauseError> {
+        let inner = &self.inner;
+        let (ids, hold, running, pids) = {
+            let jobs = inner.jobs();
+            let slot = jobs
+                .get(&id)
+                .filter(|s| !s.info.state.is_finished())
+                .ok_or(PauseError::NotActive(id))?;
+            let group = slot.info.group.unwrap_or(id);
+            let stages: Vec<&Slot> = jobs
+                .values()
+                .filter(|s| s.info.group.unwrap_or(s.info.id) == group)
+                .filter(|s| !s.info.state.is_finished())
+                .collect();
+            let running = stages.iter().any(|s| s.info.started.is_some());
+            let pids: Vec<u32> = stages.iter().flat_map(|s| s.pids.iter().copied()).collect();
+            let ids: Vec<JobId> = stages.iter().map(|s| s.info.id).collect();
+            (ids, Arc::clone(&slot.hold), running, pids)
+        };
+        if *hold.borrow() == pause {
+            return Ok(());
+        }
+        if running {
+            let processes = inner.processes.as_ref().filter(|_| !pids.is_empty());
+            let processes = processes.ok_or(PauseError::NoProcess(id))?;
+            let done = if pause {
+                processes.suspend(&pids)
+            } else {
+                processes.resume(&pids)
+            };
+            done.map_err(|reason| PauseError::Os { id, reason })?;
+        }
+        hold.send_replace(pause);
+        for stage in ids {
+            let mut started = false;
+            inner.update(stage, |info| {
+                started = info.started.is_some();
+                info.state = match (pause, started) {
+                    (true, _) => JobState::Paused,
+                    (false, true) => JobState::Running,
+                    (false, false) => JobState::Queued,
+                };
+            });
+            let (event, state) = match (pause, started) {
+                (true, _) => ("paused", JobState::Paused),
+                (false, true) => ("resumed", JobState::Running),
+                (false, false) => ("resumed", JobState::Queued),
+            };
+            inner.audit(stage, event);
+            inner.emit(JobEvent::State { id: stage, state });
+        }
+        Ok(())
+    }
+
+    /// CPU and memory of running jobs' processes. Blocking: CPU is sampled over a short
+    /// interval, so call it off the async runtime.
+    pub fn usage(&self, ids: &[JobId]) -> BTreeMap<JobId, Usage> {
+        let Some(processes) = &self.inner.processes else {
+            return BTreeMap::new();
+        };
+        let measured: Vec<(JobId, Vec<u32>)> = {
+            let jobs = self.inner.jobs();
+            ids.iter()
+                .filter_map(|id| {
+                    let slot = jobs.get(id)?;
+                    let active = matches!(slot.info.state, JobState::Running | JobState::Paused);
+                    (active && !slot.pids.is_empty()).then(|| (*id, slot.pids.clone()))
+                })
+                .collect()
+        };
+        let groups: Vec<Vec<u32>> = measured.iter().map(|(_, pids)| pids.clone()).collect();
+        measured
+            .iter()
+            .zip(processes.usage(&groups))
+            .filter_map(|((id, _), usage)| Some((*id, usage?)))
+            .collect()
+    }
+
     /// Live job events from now on.
     pub fn subscribe(&self) -> broadcast::Receiver<JobEvent> {
         self.inner.events.subscribe()
@@ -382,11 +529,18 @@ async fn run_pipe(
     retry: Retry,
 ) {
     let semaphore = inner.lanes.get(&retry.origin.lane).cloned();
+    let mut held = first.first().map(|(_, ctx)| inner.hold_of(ctx.job));
     let permit = match semaphore {
         Some(semaphore) => tokio::select! {
             biased;
             _ = group.cancelled() => None,
-            permit = semaphore.acquire_owned() => permit.ok(),
+            permit = async {
+                // A pipe paused while queued waits before it takes a slot.
+                if let Some(held) = held.as_mut() {
+                    let _ = held.wait_for(|held| !held).await;
+                }
+                semaphore.acquire_owned().await
+            } => permit.ok(),
         },
         None => None,
     };
@@ -468,14 +622,25 @@ async fn run_stage(
     });
 
     let (out, mut output) = mpsc::channel(OUTPUT_BUFFER);
+    let mut held = inner.hold_of(id);
     let mut work = action.run(ctx, input, out);
     let deadline = tokio::time::sleep(inner.config.jobs.timeout);
     tokio::pin!(deadline);
+    // The timeout clock stops while the job is paused.
+    let mut paused_at: Option<tokio::time::Instant> = None;
     let (state, error) = loop {
         tokio::select! {
             biased;
             _ = cancel.cancelled() => break (JobState::Cancelled, None),
-            _ = &mut deadline => break (JobState::TimedOut, None),
+            Ok(()) = held.changed() => {
+                if *held.borrow_and_update() {
+                    paused_at.get_or_insert_with(tokio::time::Instant::now);
+                } else if let Some(at) = paused_at.take() {
+                    let until = deadline.deadline() + at.elapsed();
+                    deadline.as_mut().reset(until);
+                }
+            }
+            _ = &mut deadline, if paused_at.is_none() => break (JobState::TimedOut, None),
             Some(chunk) = output.recv() => {
                 if !pass(&inner, id, next.as_ref(), chunk).await {
                     // The next stage stopped reading (`head` is done): this stage is done.
@@ -543,6 +708,7 @@ impl Inner {
         attempt: Option<u32>,
     ) -> Vec<(Arc<dyn Action>, JobCtx)> {
         let piped = stages.len() > 1;
+        let hold = Arc::new(watch::Sender::new(false));
         let mut group_id = None;
         let mut out = Vec::with_capacity(stages.len());
         for (action, plan, title) in stages {
@@ -575,6 +741,8 @@ impl Inner {
                     cancel: group.clone(),
                     tail: VecDeque::new(),
                     tail_bytes: 0,
+                    pids: Vec::new(),
+                    hold: Arc::clone(&hold),
                 },
             );
             self.audit(id, "submitted");
@@ -621,7 +789,22 @@ impl Inner {
         }
     }
 
+    /// The hold flag of `id`'s pipe; never held when the job is gone.
+    fn hold_of(&self, id: JobId) -> watch::Receiver<bool> {
+        self.jobs()
+            .get(&id)
+            .map_or_else(|| watch::channel(false).1, |slot| slot.hold.subscribe())
+    }
+
     fn output(&self, id: JobId, chunk: Chunk) {
+        if let Chunk::Process(pid) = chunk {
+            if let Some(slot) = self.jobs().get_mut(&id) {
+                if slot.pids.len() < MAX_PIDS {
+                    slot.pids.push(pid);
+                }
+            }
+            return;
+        }
         let chunk = match chunk {
             Chunk::Line(text) => Chunk::Line(self.redact(&text).into_owned()),
             Chunk::Error(text) => Chunk::Error(self.redact(&text).into_owned()),
@@ -631,7 +814,7 @@ impl Inner {
         let line = match &chunk {
             Chunk::Line(text) | Chunk::Info(text) => Some(text.clone()),
             Chunk::Error(text) => Some(format!("! {text}")),
-            Chunk::Cwd(_) => None,
+            Chunk::Cwd(_) | Chunk::Process(_) => None,
         };
         if let Some(line) = line {
             if let Some(store) = &self.store {
@@ -722,6 +905,8 @@ mod tests {
         Upper,
         /// Transform: the first input line only.
         First,
+        /// Reports process 42, then works for 30 s.
+        Slow,
     }
 
     struct Fake {
@@ -799,6 +984,11 @@ mod tests {
                         }
                         Ok(())
                     }
+                    Behavior::Slow => {
+                        let _ = out.send(Chunk::Process(42)).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        Ok(())
+                    }
                 }
             })
         }
@@ -812,6 +1002,7 @@ mod tests {
             Fake::action("endless", Behavior::Endless),
             Fake::action("upper", Behavior::Upper),
             Fake::action("first", Behavior::First),
+            Fake::action("slow", Behavior::Slow),
         ];
         Scheduler::new(
             actions,
@@ -855,6 +1046,75 @@ mod tests {
                 PathBuf::from("."),
             )
             .unwrap()
+    }
+
+    /// Records what was suspended and resumed.
+    #[derive(Default)]
+    struct FakeProcesses(Mutex<Vec<String>>);
+
+    impl Processes for FakeProcesses {
+        fn suspend(&self, roots: &[u32]) -> Result<(), String> {
+            self.0.lock().unwrap().push(format!("suspend {roots:?}"));
+            Ok(())
+        }
+        fn resume(&self, roots: &[u32]) -> Result<(), String> {
+            self.0.lock().unwrap().push(format!("resume {roots:?}"));
+            Ok(())
+        }
+        fn usage(&self, groups: &[Vec<u32>]) -> Vec<Option<Usage>> {
+            groups
+                .iter()
+                .map(|_| {
+                    Some(Usage {
+                        cpu: 7,
+                        memory: 1 << 20,
+                    })
+                })
+                .collect()
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn paused_jobs_keep_their_time_and_resume() {
+        let processes = Arc::new(FakeProcesses::default());
+        let mut s = scheduler(
+            "[jobs]
+timeout = \"10s\"
+",
+        );
+        Arc::get_mut(&mut s.inner).unwrap().processes = Some(processes.clone());
+        let mut events = s.subscribe();
+        let id = submit(&s, "slow");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        s.pause(id).unwrap();
+        assert_eq!(s.get(id).unwrap().state, JobState::Paused);
+        assert_eq!(
+            s.usage(&[id])[&id],
+            Usage {
+                cpu: 7,
+                memory: 1 << 20
+            }
+        );
+        // Far past the 10 s timeout while paused: still paused, not timed out.
+        tokio::time::sleep(std::time::Duration::from_secs(25)).await;
+        assert_eq!(s.get(id).unwrap().state, JobState::Paused);
+        s.resume(id).unwrap();
+        assert_eq!(finished(&mut events, id).await, JobState::Done);
+        assert_eq!(
+            *processes.0.lock().unwrap(),
+            ["suspend [42]", "resume [42]"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_job_without_a_process_cannot_be_paused() {
+        let mut s = scheduler("");
+        Arc::get_mut(&mut s.inner).unwrap().processes = Some(Arc::new(FakeProcesses::default()));
+        let id = submit(&s, "wait");
+        settle().await;
+        assert_eq!(s.pause(id), Err(PauseError::NoProcess(id)));
+        assert_eq!(s.pause(9999), Err(PauseError::NotActive(9999)));
+        s.cancel(id);
     }
 
     fn stage(command: &str) -> (Plan, String) {
@@ -1087,7 +1347,7 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, SubmitError::UnknownCommand(ref c) if c == "fly"));
-        assert_eq!(s.commands().len(), 6);
+        assert_eq!(s.commands().len(), 7);
     }
 
     #[tokio::test]

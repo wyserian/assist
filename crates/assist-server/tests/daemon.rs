@@ -115,6 +115,7 @@ async fn start(name: &str) -> Daemon {
             store: Some(store.clone()),
             redactor: Some(secrets.redactor()),
             data_dir: None,
+            processes: None,
         },
     );
     let engine = Arc::new(LiveEngine::new(Arc::new(

@@ -5,7 +5,7 @@ members = ["crates/assist-proto", "crates/assist-core", "crates/assist-actions",
 [workspace.package]
 version = "0.4.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/wyserian/assist"
 publish = false
@@ -36,6 +36,7 @@ serde_json = "1"
 sherpa-onnx = "2.0.3"
 sha2 = "0.11"
 strsim = "0.11"
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 thiserror = "2"
 tokio = "1"
 tokio-tungstenite = "0.30"
@@ -47,8 +48,9 @@ windows = "0.62"
 xcap = "0.9"
 
 [workspace.lints.rust]
-# deny, not forbid, so one audited module may opt out: the Win32 fact reader in
-# assist-actions (facts_win32.rs). Every other `unsafe` fails the build.
+# deny, not forbid, so audited modules may opt out: the Win32 fact reader and process
+# suspender in assist-actions (facts_win32.rs, processes_win32.rs). Every other `unsafe`
+# fails the build.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

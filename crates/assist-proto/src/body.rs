@@ -180,6 +180,12 @@ pub struct JobSummary {
     /// The first job of the pipe this job is a stage of.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<u64>,
+    /// CPU use of its processes in whole percent of the machine, while it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<u32>,
+    /// Memory of its processes in bytes, while it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<u64>,
 }
 
 #[cfg(test)]

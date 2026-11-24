@@ -33,6 +33,9 @@ pub enum Chunk {
     Info(String),
     /// The shell's working directory for this conversation changed.
     Cwd(PathBuf),
+    /// The action started this process; the scheduler can pause and measure it with its
+    /// descendants. Not shown.
+    Process(u32),
 }
 
 pub use assist_proto::Lane;

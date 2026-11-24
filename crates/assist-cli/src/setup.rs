@@ -151,6 +151,7 @@ impl Assistant {
                 store: Some(store.clone()),
                 redactor: secrets.as_ref().map(|secrets| secrets.redactor()),
                 data_dir: Some(paths.data.clone()),
+                processes: Some(Arc::new(assist_actions::processes::OsProcesses)),
             },
         );
         let mut phrases = PhraseSet::default_en()?;

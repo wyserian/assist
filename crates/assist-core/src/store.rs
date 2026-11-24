@@ -106,7 +106,7 @@ impl Store {
         let now = to_db(now_ms());
         let interrupted = db.execute(
             "UPDATE jobs SET state = 'interrupted', finished = ?1
-             WHERE state IN ('queued', 'running')",
+             WHERE state IN ('queued', 'running', 'paused')",
             params![now],
         )?;
         let expired = expire(&db, &logs, limits, now)?;
@@ -229,6 +229,8 @@ impl Store {
             // jobs; add a column when the dashboard groups past pipes.
             Ok(JobSummary {
                 group: None,
+                cpu: None,
+                memory: None,
                 id: from_db(row.get(0)?),
                 command: row.get(1)?,
                 title: row.get(2)?,
@@ -496,6 +498,7 @@ fn state_from(text: &str) -> JobState {
     [
         JobState::Queued,
         JobState::Running,
+        JobState::Paused,
         JobState::Done,
         JobState::Failed,
         JobState::Cancelled,

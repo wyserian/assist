@@ -141,7 +141,7 @@ function showUpdate(update) {
     const mark = update.stream === "err" ? "! " : "";
     logLine(`[#${update.id}] ${mark}${update.text}`, update.stream === "err" ? "err" : undefined);
   }
-  if (update.type === "state" && !["queued", "running"].includes(update.state)) {
+  if (update.type === "state" && !["queued", "running", "paused"].includes(update.state)) {
     if (chatJobs.has(update.id)) {
       const reason = update.error ? `: ${update.error}` : "";
       logLine(`[#${update.id}] ${update.state}${reason}`, update.state === "done" ? undefined : "err");
@@ -243,11 +243,15 @@ async function loadJobs() {
   const body = $("jobs-body");
   body.replaceChildren();
   for (const job of jobs.slice().reverse()) {
-    const active = job.state === "queued" || job.state === "running";
+    const active = ["queued", "running", "paused"].includes(job.state);
     const actions = document.createElement("span");
     actions.append(button("Log", () => showLog(job)));
-    if (active) actions.append(" ", button("Stop", () => rpc("jobs.stop", { id: job.id }).then(loadJobs), "danger"));
-    body.append(row([`#${job.id}`, job.state, job.lane, job.source, job.title, actions]));
+    const act = (method) => rpc(method, { id: job.id }).then(loadJobs).catch((err) => setStatus(err.message));
+    if (job.state === "running") actions.append(" ", button("Pause", () => act("jobs.pause")));
+    if (job.state === "paused") actions.append(" ", button("Resume", () => act("jobs.resume")));
+    if (active) actions.append(" ", button("Stop", () => act("jobs.stop"), "danger"));
+    const usage = job.cpu === undefined ? "" : ` (${job.cpu}% CPU, ${Math.round(job.memory / 1048576)} MB)`;
+    body.append(row([`#${job.id}`, job.state + usage, job.lane, job.source, job.title, actions]));
   }
   if (!jobs.length) body.append(row(["No jobs yet."]));
 }

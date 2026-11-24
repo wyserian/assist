@@ -164,6 +164,7 @@ impl Repl {
                 }
                 Chunk::Error(text) => println!("{}", output_line(id, true, &text)),
                 Chunk::Cwd(path) => self.cwd = path,
+                Chunk::Process(_) => {}
             },
             JobEvent::State { id, state } => {
                 let error = self.scheduler.get(id).and_then(|job| job.error);

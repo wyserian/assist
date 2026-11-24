@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename", "screen", "record"]
+default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename", "screen", "record", "processes"]
 shell = ["dep:process-wrap", "dep:tokio"]
 scripts = ["shell", "dep:toml"]
 apps = ["dep:open", "dep:tokio", "dep:toml"]
@@ -21,6 +21,7 @@ screen = ["dep:xcap", "dep:windows", "dep:tokio"]
 record = ["shell"]
 # Off by default: it links the speech models (sherpa-onnx); assist-cli turns it on with voice.
 transcribe = ["shell", "dep:assist-voice"]
+processes = ["dep:sysinfo", "dep:windows"]
 
 [dependencies]
 assist-core.workspace = true
@@ -28,6 +29,7 @@ assist-voice = { workspace = true, optional = true }
 open = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
 directories.workspace = true
+sysinfo = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["fs", "io-util", "macros", "process", "rt"] }

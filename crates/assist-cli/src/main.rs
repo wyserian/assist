@@ -55,6 +55,16 @@ enum Command {
         /// Job id or "all".
         target: String,
     },
+    /// Pause a running job (its whole pipe); resume continues it.
+    Pause {
+        /// Job id.
+        id: String,
+    },
+    /// Resume a paused job.
+    Resume {
+        /// Job id.
+        id: String,
+    },
     /// Show the last output of a job.
     Log {
         /// Job id.
@@ -128,6 +138,8 @@ fn main() -> Result<ExitCode> {
             Command::Run { text } => return commands::run(&paths, &text.join(" ")).await,
             Command::Jobs => commands::jobs(&paths).await?,
             Command::Facts => commands::facts(&paths).await?,
+            Command::Pause { id } => commands::hold(&paths, &id, true).await?,
+            Command::Resume { id } => commands::hold(&paths, &id, false).await?,
             Command::Stop { target } => commands::stop(&paths, &target).await?,
             Command::Log { id } => commands::log(&paths, id).await?,
             Command::Explain { text } => commands::explain(&paths, &text.join(" ")).await?,

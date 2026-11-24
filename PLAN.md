@@ -230,6 +230,13 @@ enum JobState { Queued, Running, Paused, Done, Failed, Cancelled, TimedOut, Inte
 - **Stop** kills the whole process tree (Job Objects on Windows, process groups on Linux).
 - **Pause:** queued → held; external process → SIGSTOP/SIGCONT (Linux), `NtSuspendProcess`
   (Windows, best effort); built-in → cooperative checkpoint. Actions declare `pausable`.
+  Built (Phase 3): `assist pause|resume <id>`, rpc `jobs.pause|resume`, dashboard buttons.
+  Actions that start processes report them (`Chunk::Process`); pausing suspends every
+  process in the job's tree (sysinfo walks it) and holds the whole pipe; the timeout clock
+  stops while paused; a job that runs no process cannot be paused (no cooperative
+  checkpoint yet). `jobs.list` adds CPU (whole percent of the machine) and memory per
+  running job, sampled only when asked. The OS side is the `Processes` trait in core,
+  implemented in `assist-actions` (`processes.rs`, audited `processes_win32.rs`).
 - **Durability:** after a daemon restart, `Running` jobs become `Interrupted` with a re-run
   button. Schedules missed while asleep follow `missed = "run" | "skip"`.
 - Per-job timeout, output cap; last 64 KB in SQLite, full log in `jobs/<id>.log` with retention.
@@ -485,7 +492,7 @@ Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM plan
 | Concern | Choice |
 |---|---|
 | Process trees | ⊕ `process-wrap` |
-| Metrics (Phase 3) | ⊕ `sysinfo` (sampled only while the dashboard subscribes) |
+| Metrics (Phase 3) | ⊕ `sysinfo` (sampled only when jobs are listed; also walks process trees for pause) |
 | Secrets | `keyring`, fallback `age` |
 | Automation | `open`, `enigo`, `arboard`, `notify-rust`, `xcap`, `global-hotkey` |
 | File watch | `notify` |
@@ -1030,6 +1037,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Screenshot and OCR (Phase 3 step 5b): `screenshot [file]` (xcap, primary monitor, PNG, default `Pictures/assist-<job>.png`) and `ocr [screen | image]` (Windows built-in OCR through WinRT, safe calls; output untrusted so the taint rule applies). Windows only for now: xcap on Linux needs PipeWire, XCB and libclang at build time, and Linux has no OCR engine yet (`ocrs` or Tesseract later). Typed commands also work as pipe stages (`ocr scan.png \| filter error`) |
 | 2026-11-25 | Recording (Phase 3 step 5c): `record screen|audio [for 30s] [to file]` runs ffmpeg as an external process (owner chose ffmpeg for both; not installed yet, so the action says how to install it). Matroska output stays playable when stopped. Windows: gdigrab and DirectShow (first microphone ffmpeg lists); Linux: x11grab and Pulse. New capability `record`: allow local, confirm remote and voice, deny untrusted and autopilot. Ends at `[jobs] timeout`. Not yet run for real (no ffmpeg on the laptop) |
 | 2026-11-25 | Speech to text from a file (Phase 3 step 5d): `transcribe <file>` reuses Kroko with the VAD splitting sentences (one line each, untrusted output). WAV read directly (at most 15 minutes, bounds memory near 60 MB); other formats, such as `record audio` files, converted by ffmpeg when installed. Feature `transcribe` in assist-actions, enabled by assist-cli `voice`, so a build without voice links no speech models |
+| 2026-11-25 | Job control (Phase 3 step 6): pause, resume and per-job CPU and memory, as approved by the owner: `sysinfo` 0.40 (MIT; workspace `rust-version` raised from 1.85 to 1.95 for it, the toolchain is stable) and a second audited `unsafe` module, `processes_win32.rs` (ntdll `NtSuspendProcess` / `NtResumeProcess`). New job state `paused` (wire name `paused`; a paused job at shutdown becomes `interrupted`) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

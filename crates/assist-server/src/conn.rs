@@ -222,6 +222,7 @@ impl Conn {
                         }
                         return None;
                     }
+                    Chunk::Process(_) => return None,
                 };
                 JobUpdate::Output { id, stream, text }
             }

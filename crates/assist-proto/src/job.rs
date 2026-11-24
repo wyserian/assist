@@ -10,6 +10,8 @@ pub enum JobState {
     Queued,
     /// Running.
     Running,
+    /// Held by the user: its processes are suspended, or it waits to start.
+    Paused,
     /// Finished successfully.
     Done,
     /// The action reported an error.
@@ -25,7 +27,7 @@ pub enum JobState {
 impl JobState {
     /// Whether the job has ended.
     pub fn is_finished(self) -> bool {
-        !matches!(self, Self::Queued | Self::Running)
+        !matches!(self, Self::Queued | Self::Running | Self::Paused)
     }
 
     /// Lowercase name, as on the wire and in the audit log.
@@ -33,6 +35,7 @@ impl JobState {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
+            Self::Paused => "paused",
             Self::Done => "done",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
@@ -71,6 +74,7 @@ mod tests {
         for state in [
             JobState::Queued,
             JobState::Running,
+            JobState::Paused,
             JobState::Done,
             JobState::Failed,
             JobState::Cancelled,

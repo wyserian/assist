@@ -1,6 +1,5 @@
-//! The focused app and idle time from Win32. These are the only `unsafe` calls in the
-//! workspace (Cargo.toml lints): read-only queries that change nothing. Each call states
-//! why it is sound.
+//! The focused app and idle time from Win32: read-only queries that change nothing. One of
+//! the two modules allowed `unsafe` (Cargo.toml lints); each call states why it is sound.
 #![allow(unsafe_code)]
 
 use windows::core::PWSTR;

@@ -59,6 +59,10 @@ pub(crate) async fn run(mut command: Command, cwd: &Path, out: &Output) -> Resul
         .spawn()
         .map_err(|err| ActionError::new(format!("cannot start: {err}")))?;
     let mut running = Running(child);
+    if let Some(pid) = running.0.id() {
+        // Lets the scheduler pause and measure the process tree.
+        let _ = out.send(Chunk::Process(pid)).await;
+    }
     let stdout = running.0.stdout().take();
     let stderr = running.0.stderr().take();
     let (_, _, status) = tokio::join!(
