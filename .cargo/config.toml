@@ -1,0 +1,7 @@
+# Static C runtime on Windows: sherpa-onnx's prebuilt library is built with /MT, and a static
+# CRT keeps assist.exe free of runtime DLLs.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -28,6 +28,20 @@ unused-allowed-license = "allow"
 crate = "option-ext" # via directories -> dirs-sys
 allow = ["MPL-2.0"]
 
+# Build-time only: sherpa-onnx-sys's build script downloads and unpacks its prebuilt library.
+# All three are permissive; none is linked into a binary.
+[[licenses.exceptions]]
+crate = "libbz2-rs-sys" # bzip2 decompression
+allow = ["bzip2-1.0.6"]
+
+[[licenses.exceptions]]
+crate = "ppmd-rust" # via zip
+allow = ["CC0-1.0", "MIT-0"]
+
+[[licenses.exceptions]]
+crate = "webpki-roots" # Mozilla CA roots for the download's TLS
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
