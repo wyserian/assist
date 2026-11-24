@@ -1,11 +1,17 @@
-//! Voice input (PLAN.md Phase 2): microphone capture, voice activity detection and utterance
-//! segmentation. Speech recognition, spoken replies and the wake word build on these.
+//! Voice (PLAN.md Phase 2): microphone capture, voice activity detection, utterance
+//! segmentation, streaming speech to text and spoken replies through the OS voice.
 //!
 //! Audio never reaches the async runtime: [`Mic`] reads on its own thread and hands out
 //! 16 kHz mono chunks; [`Segmenter`] turns them into [`Event`]s on the caller's thread.
 
 mod capture;
 mod segment;
+#[cfg(not(windows))]
+#[path = "speak_unix.rs"]
+mod speak;
+#[cfg(windows)]
+#[path = "speak_windows.rs"]
+mod speak;
 mod stt;
 mod vad;
 
@@ -13,6 +19,7 @@ use std::path::PathBuf;
 
 pub use capture::{input_devices, Mic};
 pub use segment::{Event, Segmenter, PRE_ROLL};
+pub use speak::Speaker;
 pub use stt::{Recognizer, Transcript};
 pub use vad::{Detector, Silero, VadSettings};
 
@@ -45,6 +52,9 @@ pub enum VoiceError {
     /// A model file is missing.
     #[error("model file {} not found", .0.display())]
     Model(PathBuf),
+    /// The OS voice failed or is missing.
+    #[error("speech output: {0}")]
+    Speech(String),
     /// The speech library could not create a component (bad model file, out of memory).
     #[error("could not create the {0}")]
     Engine(&'static str),

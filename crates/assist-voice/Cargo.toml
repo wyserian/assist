@@ -13,6 +13,9 @@ cpal.workspace = true
 sherpa-onnx.workspace = true
 thiserror.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Foundation", "Media_Core", "Media_Playback", "Media_SpeechSynthesis", "Storage_Streams"] }
+
 [dev-dependencies]
 anyhow.workspace = true
 

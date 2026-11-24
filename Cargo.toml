@@ -40,6 +40,7 @@ tokio-util = "0.7"
 toml = "1"
 toml_edit = "0.25"
 uuid = "1"
+windows = "0.62"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
