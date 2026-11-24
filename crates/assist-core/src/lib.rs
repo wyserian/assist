@@ -19,3 +19,4 @@ pub mod replies;
 pub mod scheduler;
 pub mod secrets;
 pub mod store;
+pub mod trigger;

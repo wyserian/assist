@@ -20,6 +20,21 @@ build  = { run = "cargo build", lane = "background" }
 [pipes]
 errors = { run = "run build | filter error | save build-errors.txt", retry = 1 }
 
+# Schedules and triggers start saved pipes marked unattended = true, which may not need any
+# confirmation (nobody is there to give it). Examples, off by default:
+#
+# [[schedules]]
+# run = "errors"
+# at = "07:30 mon-fri"           # or every = "1h"; missed = "run" runs once after sleep
+#
+# [[triggers]]
+# run = "errors"
+# on = "node.battery < 20"       # fires when the condition turns true
+#
+# [[triggers]]
+# run = "errors"
+# watch = "~/Downloads"          # fires when something in the folder changes
+
 [contacts]
 mom = "+910000000000"
 dad = "+910000000001"

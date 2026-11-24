@@ -306,6 +306,29 @@ impl Engine {
         Ok(pipe)
     }
 
+    /// A saved pipe for a schedule or trigger, which nobody watches (PLAN.md section 3.4): it
+    /// must be marked `unattended` and run without any confirmation. `Ok(None)` when its
+    /// `if` does not hold; the error says why it may not run.
+    pub fn unattended(&self, name: &str, principal: &Principal) -> Result<Option<Pipe>, String> {
+        if !self.config.pipes.get(name).is_some_and(|p| p.unattended) {
+            return Err(format!("{name} is not marked unattended"));
+        }
+        if self.unmet_condition(name).is_some() {
+            return Ok(None);
+        }
+        let pipe = self
+            .saved_pipe(name)
+            .map_err(|(line, text)| self.say(line, &[("text", &text)]))?;
+        match self.pipe_decision(principal, &pipe) {
+            Some(Decision::Allow) => Ok(Some(pipe)),
+            Some(Decision::Confirm) => Err(format!(
+                "{name} needs a confirmation, which nobody can give unattended"
+            )),
+            Some(Decision::Deny) => Err(format!("{name} is not allowed")),
+            None => Err(format!("{name} uses a command this device does not have")),
+        }
+    }
+
     /// A saved pipe's `if` when the current facts do not meet it.
     fn unmet_condition(&self, name: &str) -> Option<String> {
         let text = self.config.pipes.get(name)?.condition.as_deref()?;
@@ -1325,6 +1348,43 @@ send = {{ local = \"allow\" }}
         facts.set("node.charging", crate::facts::Value::Bool(true));
         let ran = dialog.handle(&owner, "run plugged", Instant::now());
         assert_eq!(ran.run.len(), 1);
+    }
+
+    #[test]
+    fn unattended_runs_need_the_flag_and_no_confirmation() {
+        let extra = "auto = { run = \"run build | count\", unattended = true }
+                     manual = { run = \"run build | count\" }
+                     asks = { run = \"run build | save out.txt\", unattended = true }
+                     later = { run = \"run build\", unattended = true, if = \"node.charging\" }
+";
+        let config = Arc::new(Config::from_toml(&format!("{CONFIG}{extra}")).unwrap());
+        let engine = Engine::new(
+            config,
+            &PhraseSet::default_en().unwrap(),
+            commands(),
+            true,
+            Facts::default(),
+        )
+        .unwrap();
+        let timer = Principal::local("schedule");
+        assert_eq!(
+            engine
+                .unattended("auto", &timer)
+                .unwrap()
+                .unwrap()
+                .stages
+                .len(),
+            2
+        );
+        assert!(engine
+            .unattended("manual", &timer)
+            .unwrap_err()
+            .contains("not marked"));
+        assert!(engine
+            .unattended("asks", &timer)
+            .unwrap_err()
+            .contains("confirmation"));
+        assert_eq!(engine.unattended("later", &timer), Ok(None));
     }
 
     #[test]

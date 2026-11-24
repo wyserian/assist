@@ -10,6 +10,7 @@ use assist_server::{serve, Services};
 use tokio::net::TcpListener;
 
 use crate::setup::{Assistant, Paths};
+use crate::triggers;
 
 /// File in the data directory with the address the daemon listens on.
 const ADDR_FILE: &str = "daemon.addr";
@@ -44,6 +45,15 @@ pub async fn run(paths: Paths) -> Result<()> {
         user_phrases: Some(paths.phrases_dir().join("user.toml")),
         config_file: Some(paths.config_file().clone()),
     };
+    triggers::start(
+        &assistant.config,
+        triggers::Runner {
+            engine: assistant.engine.clone(),
+            scheduler: assistant.scheduler.clone(),
+            facts: assistant.facts.clone(),
+            cwd: std::env::current_dir()?,
+        },
+    );
     let result = serve(services, listener, async {
         let _ = tokio::signal::ctrl_c().await;
     })

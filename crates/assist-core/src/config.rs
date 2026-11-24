@@ -16,6 +16,7 @@ use crate::dialog::SHELL;
 use crate::phrases::PhraseSet;
 use crate::policy::PolicyOverrides;
 use crate::replies::Line;
+use crate::trigger::{Missed, Schedule};
 
 /// The config format version this build reads.
 pub const CURRENT_VERSION: u32 = 1;
@@ -60,6 +61,12 @@ pub struct Config {
     /// Who the assistant is and how it addresses you.
     #[serde(default)]
     pub persona: PersonaConfig,
+    /// Saved pipes run on a clock.
+    #[serde(default)]
+    pub schedules: Vec<ScheduleConfig>,
+    /// Saved pipes run on fact changes or file changes.
+    #[serde(default)]
+    pub triggers: Vec<TriggerConfig>,
     /// Reply lines that replace the defaults, keyed as in `phrases/en/replies.toml`.
     #[serde(default)]
     pub replies: BTreeMap<String, String>,
@@ -204,7 +211,7 @@ impl Default for JobsConfig {
 /// Parses `30s`, `10m` or `2h`.
 pub fn parse_duration(text: &str) -> Option<Duration> {
     let text = text.trim();
-    let (digits, unit) = [('s', 1), ('m', 60), ('h', 3600)]
+    let (digits, unit) = [('s', 1), ('m', 60), ('h', 3600), ('d', 86_400)]
         .into_iter()
         .find_map(|(suffix, secs)| text.strip_suffix(suffix).map(|d| (d, secs)))?;
     let n: u64 = digits.parse().ok()?;
@@ -237,6 +244,37 @@ pub struct SavedPipe {
     /// Runs only when this condition over facts holds, e.g. `node.charging`.
     #[serde(default, rename = "if")]
     pub condition: Option<String>,
+    /// Schedules and triggers may run it with nobody watching (PLAN.md section 3.4).
+    #[serde(default)]
+    pub unattended: bool,
+}
+
+/// `[[schedules]]`: runs a saved pipe at a time of day or at an interval.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleConfig {
+    /// The saved pipe; it must be marked `unattended`.
+    pub run: String,
+    /// Local time and days, e.g. `07:30 mon-fri`.
+    pub at: Option<String>,
+    /// Interval, e.g. `1h`.
+    pub every: Option<String>,
+    /// What to do when the time passed while the device slept.
+    #[serde(default)]
+    pub missed: Missed,
+}
+
+/// `[[triggers]]`: runs a saved pipe when a fact condition turns true (`on`) or something
+/// changes in a folder (`watch`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TriggerConfig {
+    /// The saved pipe; it must be marked `unattended`.
+    pub run: String,
+    /// A condition over facts, e.g. `node.battery < 20`.
+    pub on: Option<String>,
+    /// A folder; `~` is the home folder.
+    pub watch: Option<String>,
 }
 
 /// Settings for one command (`[commands.<name>]`).
@@ -332,6 +370,7 @@ impl Config {
                 return Err(ConfigError::Invalid(format!("[pipes] {name}: {err}")));
             }
         }
+        config.validate_triggers()?;
         if let Some(key) = config.replies.keys().find(|k| Line::from_key(k).is_none()) {
             return Err(ConfigError::Invalid(format!(
                 "[replies] {key} is not a known reply"
@@ -367,6 +406,42 @@ impl Config {
             Some(name) => Err(ConfigError::UnknownCommand(name.clone())),
             None => Ok(()),
         }
+    }
+
+    /// Schedules and triggers name saved pipes marked `unattended` and have exactly one
+    /// valid rule each.
+    fn validate_triggers(&self) -> Result<(), ConfigError> {
+        let unattended = |section: &str, run: &str| {
+            match self.pipes.get(run) {
+            Some(pipe) if pipe.unattended => Ok(()),
+            Some(_) => Err(ConfigError::Invalid(format!(
+                "[[{section}]] {run}: mark the pipe unattended = true to run it with nobody watching"
+            ))),
+            None => Err(ConfigError::Invalid(format!(
+                "[[{section}]] {run}: no saved pipe with that name in [pipes]"
+            ))),
+        }
+        };
+        for schedule in &self.schedules {
+            unattended("schedules", &schedule.run)?;
+            Schedule::parse(schedule.at.as_deref(), schedule.every.as_deref()).map_err(|e| {
+                ConfigError::Invalid(format!("[[schedules]] {}: {e}", schedule.run))
+            })?;
+        }
+        for trigger in &self.triggers {
+            unattended("triggers", &trigger.run)?;
+            let invalid = |reason: String| {
+                ConfigError::Invalid(format!("[[triggers]] {}: {reason}", trigger.run))
+            };
+            match (&trigger.on, &trigger.watch) {
+                (Some(on), None) => {
+                    Condition::parse(on).map_err(|e| invalid(e.to_string()))?;
+                }
+                (None, Some(watch)) if !watch.trim().is_empty() => {}
+                _ => return Err(invalid("give either on or watch".to_owned())),
+            }
+        }
+        Ok(())
     }
 
     /// Value lists that `list:<name>` slots match against: `apps`, `contacts`, `scripts`,

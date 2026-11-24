@@ -26,6 +26,8 @@ assist-server.workspace = true
 assist-voice = { workspace = true, optional = true }
 clap.workspace = true
 directories.workspace = true
+jiff.workspace = true
+notify.workspace = true
 futures-util.workspace = true
 keyring.workspace = true
 open.workspace = true

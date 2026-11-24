@@ -28,6 +28,16 @@ unused-allowed-license = "allow"
 crate = "option-ext" # via directories -> dirs-sys
 allow = ["MPL-2.0"]
 
+# notify (folder triggers, Phase 3) and its hash crate: public domain and Boost, both
+# permissive, approved by the owner with notify.
+[[licenses.exceptions]]
+crate = "notify"
+allow = ["CC0-1.0"]
+
+[[licenses.exceptions]]
+crate = "xxhash-rust" # via notify
+allow = ["BSL-1.0"]
+
 # Build-time only: sherpa-onnx-sys's build script downloads and unpacks its prebuilt library.
 # All three are permissive; none is linked into a binary.
 [[licenses.exceptions]]

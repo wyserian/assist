@@ -19,6 +19,7 @@ mod listen;
 mod models;
 mod repl;
 mod setup;
+mod triggers;
 
 /// Offline-first personal automation and voice assistant.
 #[derive(Parser)]

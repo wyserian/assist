@@ -303,6 +303,15 @@ Adapters that emit Utterances, so the core never changes: CLI, web, voice, Teleg
 webhook (`Untrusted`), timer (`[[schedules]]`), file watch (`notify`), fact change
 (`on = "node.battery < 20"`). Unattended rules from §3.4 apply.
 
+- Built (Phase 3): `[[schedules]] { run, at = "07:30 mon-fri" | every = "1h", missed }` and
+  `[[triggers]] { run, on = "<condition>" | watch = "<folder>" }`. `run` names a saved pipe
+  marked `unattended = true` (checked at config load); the run is refused when anything in it
+  would need a confirmation. Fact triggers fire when the condition turns true (once per
+  change); folder triggers fire 2 s after changes settle, then ignore the folder for 10 s.
+  Schedules use the local time zone (`jiff`), checked every 15 s; more than 2 min late counts
+  as missed while asleep. The daemon prints what each trigger did; the jobs it starts are
+  audited as usual with source `schedule` or `trigger`.
+
 ### 3.13 Nodes, remote, sync (Phase 5)
 
 ```mermaid
@@ -471,6 +480,7 @@ Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM plan
 | Secrets | `keyring`, fallback `age` |
 | Automation | `open`, `enigo`, `arboard`, `notify-rust`, `xcap`, `global-hotkey` |
 | File watch | `notify` |
+| Local time | ⊕ `jiff` (schedules in the local time zone) |
 | Windows APIs | ⊕ `windows` / `windows-sys` (OCR, priority, suspend) |
 
 ### Voice (Phase 2)
@@ -1006,6 +1016,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Saved pipes and pipe control (Phase 3 step 2): `[pipes]`, `run_pipe` phrase-only command expanded by the dialog, `retry` (max 10) and `on_error` in the scheduler (`Submission`), policy over every stage that may run. Taint rule: `PipeShape.untrusted`; a `send` stage after an untrusted one always asks. No action declares untrusted output yet (OCR and web actions will). `if <fact>` comes with facts in step 3 |
 | 2026-11-25 | Facts (Phase 3 step 3): core `Facts` store and `Condition` language; `if` on saved pipes checked by the dialog (a skipped pipe makes no jobs). Battery facts through safe APIs only (WinRT `PowerManager`, Linux sysfs); focused app and idle time wait for a decision on an audited `unsafe` exception, since `unsafe_code` is forbidden workspace-wide |
 | 2026-11-25 | `unsafe_code` lowered from `forbid` to `deny` so exactly one audited module may opt out: `assist-actions/src/facts_win32.rs` (read-only Win32: foreground window, process image name, last input time), each call with a SAFETY comment. Approved by the owner; any other `unsafe` still fails the build |
+| 2026-11-25 | Triggers (Phase 3 step 4): rules in core (`trigger.rs`: schedule parsing and next time, fact edges; `Engine::unattended`), clock and folder watching in `assist-cli` (no OS I/O in core). New crates, approved: `jiff` 1.0 (local time zone, DST; MIT OR Unlicense) and `notify` 9.0 (CC0-1.0, deny exception; brings `xxhash-rust`, BSL-1.0, deny exception) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |
