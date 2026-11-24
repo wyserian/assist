@@ -6,16 +6,26 @@
 
 mod capture;
 mod segment;
+mod stt;
 mod vad;
 
 use std::path::PathBuf;
 
 pub use capture::{input_devices, Mic};
 pub use segment::{Event, Segmenter, PRE_ROLL};
+pub use stt::{Recognizer, Transcript};
 pub use vad::{Detector, Silero, VadSettings};
 
 /// Sample rate of everything this crate hands out, Hz.
 pub const RATE: u32 = 16_000;
+
+/// The Silero VAD model file inside the models directory.
+pub const VAD_MODEL: &str = "silero_vad.onnx";
+
+/// The English speech model directory inside the models directory: Kroko streaming, the most
+/// accurate in the Phase 2 spike. Its licence is unclear, so it is downloaded by the user,
+/// never bundled (PLAN.md section 12).
+pub const STT_MODEL: &str = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06";
 
 /// Why voice input could not start or stopped.
 #[derive(Debug, thiserror::Error)]

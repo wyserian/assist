@@ -1,43 +1,57 @@
-//! Prints when speech starts and ends on a microphone.
+//! Prints what is said on a microphone and how long recognition took after speech ended.
 //!
-//! cargo run -p assist-voice --release --example listen -- <silero_vad.onnx> [device]
+//! cargo run -p assist-voice --release --example listen -- <models dir> [device]
 //! cargo run -p assist-voice --release --example listen -- devices
+//!
+//! The models directory holds `silero_vad.onnx` and the Kroko model directory.
 
-use std::time::Duration;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use assist_voice::{input_devices, Event, Mic, Segmenter, Silero, VadSettings, RATE};
+use assist_voice::{
+    input_devices, Event, Mic, Recognizer, Segmenter, Silero, VadSettings, STT_MODEL, VAD_MODEL,
+};
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
-    let model = args
+    let models = args
         .next()
-        .context("usage: listen <silero_vad.onnx> [device] | devices")?;
-    if model == "devices" {
+        .context("usage: listen <models dir> [device] | devices")?;
+    if models == "devices" {
         for name in input_devices()? {
             println!("{name}");
         }
         return Ok(());
     }
+    let models = Path::new(&models);
     let device = args.next();
     let settings = VadSettings::default();
-    let mut segmenter = Segmenter::new(Silero::new(model.as_ref(), &settings)?, &settings);
+    let mut segmenter = Segmenter::new(Silero::new(&models.join(VAD_MODEL), &settings)?, &settings);
+    let recognizer = Recognizer::new(&models.join(STT_MODEL))?;
     let mic = Mic::open(device.as_deref())?;
     println!("Listening on {}. Speak; Ctrl+C stops.", mic.name());
 
-    let mut samples = 0usize;
+    let mut transcript = None;
     loop {
         let Some(chunk) = mic.recv(Duration::from_secs(1))? else {
             continue;
         };
         segmenter.push(&chunk, |event| match event {
-            Event::Start => {
-                samples = 0;
-                print!("speech ... ");
+            Event::Start => transcript = Some(recognizer.start()),
+            Event::Audio(audio) => {
+                if let Some(t) = transcript.as_mut() {
+                    t.feed(audio);
+                }
             }
-            Event::Audio(audio) => samples += audio.len(),
-            Event::End => println!("end, {:.1} s with pre-roll", samples as f32 / RATE as f32),
+            Event::End => {
+                if let Some(t) = transcript.take() {
+                    let ended = Instant::now();
+                    let text = t.finish();
+                    let ms = ended.elapsed().as_millis();
+                    println!("{text:?}  ({ms} ms after speech ended)");
+                }
+            }
         });
-        std::io::Write::flush(&mut std::io::stdout())?;
     }
 }
