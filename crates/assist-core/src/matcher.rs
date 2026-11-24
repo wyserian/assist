@@ -280,9 +280,68 @@ impl RuleMatcher {
     }
 }
 
+/// Words people put around a command that no phrase needs: "okay, can you open firefox
+/// please". Normalized form, longest first so "can you" goes before "can".
+const LEADING_FILLERS: [&str; 22] = [
+    "i am going to",
+    "go ahead and",
+    "i'm gonna",
+    "i want to",
+    "would you",
+    "could you",
+    "will you",
+    "can you",
+    "i wanna",
+    "im gonna",
+    "can u",
+    "please",
+    "okay",
+    "alright",
+    "right",
+    "just",
+    "well",
+    "hey",
+    "um",
+    "uh",
+    "ok",
+    "so",
+];
+const TRAILING_FILLERS: [&str; 5] = ["thank you", "for me", "thanks", "please", "now"];
+
+/// `text` without leading and trailing filler words; `None` if there were none.
+fn without_fillers(text: &str) -> Option<&str> {
+    let mut rest = text;
+    loop {
+        let before = rest;
+        for filler in LEADING_FILLERS {
+            if let Some(after) = rest.strip_prefix(filler).and_then(|r| r.strip_prefix(' ')) {
+                rest = after;
+            }
+        }
+        for filler in TRAILING_FILLERS {
+            if let Some(before) = rest.strip_suffix(filler).and_then(|r| r.strip_suffix(' ')) {
+                rest = before;
+            }
+        }
+        if rest == before {
+            break;
+        }
+    }
+    (rest != text && !rest.is_empty()).then_some(rest)
+}
+
 impl Matcher for RuleMatcher {
+    /// The input as said first, so a filler word inside a slot ("saying come home please")
+    /// is kept; then without filler words around it.
     fn best(&self, text: &str) -> Option<Intent> {
         let normalized = normalize(text);
+        self.best_normalized(&normalized)
+            .or_else(|| without_fillers(&normalized).and_then(|core| self.best_normalized(core)))
+    }
+}
+
+impl RuleMatcher {
+    fn best_normalized(&self, normalized: &str) -> Option<Intent> {
         if normalized.is_empty() {
             return None;
         }

@@ -111,9 +111,38 @@ text = "turn volume to twenty-five"
 command = "set_volume"
 slots = { level = "25" }
 
+# filler words around a command
+[[case]]
+text = "can you open firefox"
+command = "open_app"
+slots = { app = "firefox" }
+
+[[case]]
+text = "okay so i'm gonna can you open notepad please"
+command = "open_app"
+slots = { app = "notepad" }
+
+[[case]]
+text = "okay open firebox"
+command = "open_app"
+slots = { app = "firefox" }
+
+[[case]]
+text = "could you search rust tokio for me"
+command = "search"
+slots = { query = "rust tokio" }
+
+[[case]]
+text = "text mom saying come home please"
+command = "send_sms"
+slots = { contact = "mom", text = "come home please" }
+
 # no match
 [[case]]
 text = "make me a sandwich"
+
+[[case]]
+text = "okay so"
 
 [[case]]
 text = "open banana"

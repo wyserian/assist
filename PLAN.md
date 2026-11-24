@@ -200,8 +200,13 @@ semantic and LLM stages plug in without changing callers.
 
 - **Context-aware grammars:** each command may declare `when = "app.focused == 'code'"`; only
   active commands go into the voice grammar (smaller grammar → fewer errors).
-- **Semantic stage (Phase 2):** small sentence-embedding model (bge-small / MiniLM class, ONNX,
-  ~30 MB, measure) compares input with all phrases; above threshold → Intent, else suggestions.
+- **Filler words:** when the input as said matches nothing, the rule stage tries again without
+  leading and trailing filler words ("okay so can you ... please"); the English lists live in
+  the matcher.
+- **Semantic stage (deferred from Phase 2):** small sentence-embedding model (bge-small / MiniLM
+  class, ONNX, ~30 MB, measure) compares input with all phrases; above threshold → Intent, else
+  suggestions. Built when recorded misses show paraphrases the rules and filler words cannot
+  catch.
 - **Learn from misses:** unmatched input is logged; the dashboard suggests "add 'fire up chrome'
   as a phrase for `open_app`?".
 - Evaluate compatibility with Home Assistant `hassil` sentence templates (shared phrase data and
@@ -845,7 +850,7 @@ Secrets, Settings, Commands with miss suggestions, Audit, Clients, STOP ALL).
 **Phase 2 — Desktop voice**
 Spike sherpa-onnx vs Vosk on the real laptop and decide; capture, VAD, grammar/hotword commands
 with context-aware grammars, dictation slots, OS TTS, `listen` (Enter pauses; a global hotkey comes with the tray app), optional wake word,
-speaker verification for voice confirms, semantic match stage, Wyoming adapter, persona reply
+speaker verification for voice confirms, filler words (semantic match stage deferred, see section 13), Wyoming adapter, persona reply
 templates, stop-on-wake-word barge-in.
 *Done when:* "open firefox" by voice works within budget on the real laptop.
 
@@ -972,6 +977,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-24 | Persona replies (templates part of section 3.17): every dialog line comes from `config/phrases/en/replies.toml`, overridable in config `[replies]` (unknown keys are config errors), filled with `[persona]` `name` / `address` (defaults "Bee" / "Prime"; an empty address drops its separator). Commands get their own `reply` ("Opening {app}.") and `confirm` ("Call {contact}?") lines in their phrase files; confirmations keep the readback values (quoted text, contact with number) so confirmation binding stays visible. `assist listen` greets on start. `style` and wake word are not implemented yet |
 | 2026-11-25 | Wake word and barge-in: sherpa keyword spotter with the gigaspeech 3.3M model (Apache-2.0, 18 MB, downloaded on first use with the others; the release publishes no digest, so the sha256 is pinned from the first download). Kroko alone was rejected for the wake word: it writes "Bee" as B, be, Haybe or OKB. Wake phrases come from `[persona]` (`hey/okay/ok <name>`, or `wake_word`); assist-voice spells them in the model's BPE pieces itself, with the variants the model actually hears for a short name (HEY BEE, HEY BE, HEYBE, HEY B). Boost 2.0 / threshold 0.15: on the OS voice every "hey/okay Bee" phrase was found, "Bee" alone is not, and the owner's 22 clips (74 s) gave no false alarm; about 5% of one core. `listen` sends speech only after the wake word or within 8 s of the last exchange; recognition restarts after the wake word so the text is the command; the wake word or "stop" stops a reply (keywords are the only thing heard while it speaks). Not yet measured: the user's own voice and barge-in latency against the 200 ms budget |
 | 2026-11-25 | Speaker verification: 3D-Speaker CAM++ (Apache-2.0, 30 MB, 43 ms per utterance; sha256 pinned from the first download) over WeSpeaker ResNet34, whose owner and other-voice scores overlapped. Spike (5 owner clips enrolled, 17 tested, 5 OS voices x 26 sentences): owner whole utterances 0.49-0.86, owner last 1 s 0.26-0.71, other voices -0.15-0.12; default `[voice] speaker_threshold = 0.35`. `assist enroll` reads 5 sentences and saves the averaged voiceprint to `<data>/voiceprint.txt` (user-only, atomic write; `--forget` deletes it). `listen` scores every utterance and sends `Utterance.speaker_verified`; a client sending it already holds the token, so it grants nothing new. Dialog: on a `Voice` conversation a "yes" confirms only when vouched for (verified voice, or a local dashboard answer); otherwise "I don't recognise your voice. Confirm on screen." and the question stays open. Without a voiceprint, voice can no longer confirm. Not yet measured: other people's real voices, which will score higher than the OS voices |
+| 2026-11-25 | Semantic stage deferred, filler words instead. The 32 recorded misses from real `listen` use were filler words before a valid command ("can you open ...", "okay so i'm gonna ...", "okay open firebox"), apps missing from `[apps]` (chrome, explorer, visual studio), recognition garbage and chatter; none was a paraphrase an embedding model would fix better. An embedding model also needs ONNX Runtime (`ort`, whose static build would clash with the onnxruntime inside sherpa's static library) and a tokenizer. The rule matcher now retries without leading/trailing filler words (as-said first, so fillers inside a text slot stay). Revisit with the miss log |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |
