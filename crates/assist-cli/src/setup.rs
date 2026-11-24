@@ -42,10 +42,19 @@ impl Paths {
         };
         Ok(Self { config, data })
     }
+
+    /// The data directory: audit log, job store, token, daemon address.
+    pub fn data(&self) -> &PathBuf {
+        &self.data
+    }
 }
 
 /// Everything a running assistant needs.
 pub struct Assistant {
+    /// The loaded config.
+    pub config: Arc<Config>,
+    /// Secrets, if a keystore is available.
+    pub secrets: Option<Arc<Secrets>>,
     /// Audit log.
     pub audit: Audit,
     /// Job history.
@@ -85,14 +94,15 @@ impl Assistant {
         let secrets = OsKeystore::open()
             .and_then(|keystore| Secrets::open(Box::new(keystore), &paths.data))
             .map_err(|err| println!("Secrets are off: {err}"))
-            .ok();
+            .ok()
+            .map(Arc::new);
         let scheduler = Scheduler::new(
             assist_actions::builtin(),
             Arc::clone(&config),
             Persistence {
                 audit: Some(audit.clone()),
                 store: Some(store.clone()),
-                redactor: secrets.as_ref().map(Secrets::redactor),
+                redactor: secrets.as_ref().map(|secrets| secrets.redactor()),
             },
         );
         let phrases = PhraseSet::default_en()?;
@@ -103,6 +113,8 @@ impl Assistant {
             true,
         )?);
         Ok(Self {
+            config,
+            secrets,
             audit,
             store,
             scheduler,

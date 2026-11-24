@@ -33,6 +33,9 @@ pub struct Reply {
     /// Jobs started by this utterance.
     #[serde(default)]
     pub jobs: Vec<JobBrief>,
+    /// The assistant asked a question and waits for the answer in this conversation.
+    #[serde(default)]
+    pub waiting: bool,
 }
 
 /// A job just started.

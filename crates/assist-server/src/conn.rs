@@ -140,6 +140,7 @@ impl Conn {
         let mut answer = Reply {
             say: reply.say,
             jobs: Vec::new(),
+            waiting: self.dialog.is_waiting(),
         };
         for plan in reply.run {
             let title = self.state.services.engine.readback(&plan);

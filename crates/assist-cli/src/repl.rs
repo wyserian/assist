@@ -14,10 +14,11 @@ use anyhow::Result;
 use assist_core::action::Chunk;
 use assist_core::dialog::{Dialog, Engine};
 use assist_core::policy::Principal;
-use assist_core::scheduler::{JobEvent, JobId, JobState, Scheduler};
+use assist_core::scheduler::{JobEvent, JobId, Scheduler};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::broadcast::{self, error::RecvError};
 
+use crate::display::{ended_line, job_row, output_line, printable};
 use crate::setup::{Assistant, Paths};
 
 const HELP: &str = "\
@@ -102,14 +103,6 @@ fn prompt() {
     let _ = io::stdout().flush();
 }
 
-/// `text` with control characters replaced, so job output cannot move the cursor, change the
-/// terminal title or hide text.
-fn printable(text: &str) -> String {
-    text.chars()
-        .map(|c| if c.is_control() && c != '\t' { '?' } else { c })
-        .collect()
-}
-
 impl Repl {
     fn handle(&mut self, line: &str) -> Flow {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -155,25 +148,19 @@ impl Repl {
     fn show(&mut self, event: JobEvent) {
         match event {
             JobEvent::Output { id, chunk } => match chunk {
-                Chunk::Line(text) | Chunk::Info(text) => println!("[#{id}] {}", printable(&text)),
-                Chunk::Error(text) => println!("[#{id}] ! {}", printable(&text)),
+                Chunk::Line(text) | Chunk::Info(text) => {
+                    println!("{}", output_line(id, false, &text))
+                }
+                Chunk::Error(text) => println!("{}", output_line(id, true, &text)),
                 Chunk::Cwd(path) => self.cwd = path,
             },
-            JobEvent::State { id, state } => match state {
-                JobState::Queued | JobState::Running => {}
-                JobState::Failed => {
-                    let reason = self
-                        .scheduler
-                        .get(id)
-                        .and_then(|job| job.error)
-                        .map_or_else(String::new, |err| format!(": {}", printable(&err.message)));
-                    println!("[#{id}] failed{reason}");
+            JobEvent::State { id, state } => {
+                let error = self.scheduler.get(id).and_then(|job| job.error);
+                let reason = error.as_ref().map(|err| err.message.as_str());
+                if let Some(line) = ended_line(id, state, reason) {
+                    println!("{line}");
                 }
-                JobState::Cancelled => println!("[#{id}] stopped"),
-                JobState::Done | JobState::TimedOut | JobState::Interrupted => {
-                    println!("[#{id}] {}", state.as_str())
-                }
-            },
+            }
         }
     }
 
@@ -183,13 +170,7 @@ impl Repl {
             println!("No jobs yet.");
         }
         for job in jobs {
-            println!(
-                "#{:<4} {:<10} {:<12} {}",
-                job.id,
-                job.state.as_str(),
-                job.lane.as_str(),
-                printable(&job.title)
-            );
+            println!("{}", job_row(&job.summary()));
         }
     }
 
@@ -305,10 +286,5 @@ mod tests {
             }
         }
         assert_eq!(got, ["one", "two", "<too long>", "last"]);
-    }
-
-    #[test]
-    fn control_characters_are_not_printed() {
-        assert_eq!(printable("ok\x1b]0;pwned\x07\tend"), "ok?]0;pwned?\tend");
     }
 }

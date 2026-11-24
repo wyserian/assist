@@ -16,10 +16,16 @@ path = "src/main.rs"
 anyhow.workspace = true
 assist-actions.workspace = true
 assist-core.workspace = true
+assist-proto.workspace = true
+assist-server.workspace = true
 clap.workspace = true
 directories.workspace = true
+futures-util.workspace = true
 keyring.workspace = true
-tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal", "sync"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite.workspace = true
 
 [lints]
 workspace = true

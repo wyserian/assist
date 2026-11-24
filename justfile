@@ -9,6 +9,10 @@ test:
     cargo nextest run --workspace
     cargo test --workspace --doc
 
+# the daemon; pass e.g. `--config config/config.example.toml`
+run *args:
+    cargo run -p assist-cli -- serve {{args}}
+
 # interactive assist shell; pass e.g. `--config config/config.example.toml`
 shell *args:
     cargo run -p assist-cli -- shell {{args}}
