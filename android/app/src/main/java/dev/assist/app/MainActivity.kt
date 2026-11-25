@@ -2,7 +2,9 @@ package dev.assist.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +59,12 @@ class MainActivity : ComponentActivity() {
 private fun Chat(model: ChatViewModel) {
     var input by rememberSaveable { mutableStateOf("") }
     val list = rememberLazyListState()
+    val prompt = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { answers ->
+        answers.forEach { (permission, granted) -> model.permissionAnswered(permission, granted) }
+    }
+    LaunchedEffect(Unit) {
+        for (permission in model.permissions) prompt.launch(arrayOf(permission))
+    }
     LaunchedEffect(model.lines.size) {
         if (model.lines.isNotEmpty()) list.animateScrollToItem(model.lines.lastIndex)
     }
