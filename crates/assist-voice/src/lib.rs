@@ -5,6 +5,7 @@
 //! Audio never reaches the async runtime: [`Mic`] reads on its own thread and hands out
 //! 16 kHz mono chunks; [`Segmenter`] turns them into [`Event`]s on the caller's thread.
 
+mod attention;
 #[cfg(not(target_os = "android"))]
 mod capture;
 mod file;
@@ -23,6 +24,7 @@ mod wake;
 
 use std::path::PathBuf;
 
+pub use attention::{Attention, Heard, AWAKE};
 #[cfg(not(target_os = "android"))]
 pub use capture::{input_devices, Mic};
 pub use file::{read_wav, transcribe, MAX_FILE_SECONDS};

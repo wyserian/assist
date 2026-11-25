@@ -2,8 +2,7 @@
 //! connection voice trust (PLAN.md section 3.6). Audio, recognition and speech run on their
 //! own thread; this task only talks to the daemon.
 //!
-//! Speech counts only after the wake word ("hey Bee") or within [`AWAKE`] of the last
-//! exchange. The wake word or "stop" cuts a reply short (barge-in). With a voiceprint from
+//! Wake word, awake window and barge-in are `assist_voice::Attention`. With a voiceprint from
 //! `assist enroll`, each utterance is checked against it, and only the owner's "yes"
 //! confirms.
 
@@ -11,25 +10,18 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{bail, Result};
 use assist_core::replies::{Line, Replies};
 use assist_proto::Reply;
-use assist_voice::{
-    Event, Keyword, Mic, Recognizer, Segmenter, Silero, Speaker, SpeakerModel, Spotter,
-    VadSettings, VoiceError, Voiceprint, KWS_MODEL, RATE, SPEAKER_MODEL, STT_MODEL, VAD_MODEL,
-};
+use assist_voice::{Attention, Mic, Speaker, SpeakerModel, VoiceError, Voiceprint, SPEAKER_MODEL};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc as async_mpsc;
 
 use crate::client::Client;
 use crate::display::printable;
 use crate::setup::Paths;
-
-/// How long the assistant keeps listening without the wake word after it was woken or last
-/// spoke, so answers to its questions need no wake word.
-const AWAKE: Duration = Duration::from_secs(8);
 
 /// What the voice thread reports.
 enum Heard {
@@ -159,15 +151,11 @@ fn voice_loop(
     say: &Receiver<String>,
 ) -> Result<(), VoiceError> {
     let models: &Path = &setup.models;
-    let settings = VadSettings::default();
-    let vad = Silero::new(&models.join(VAD_MODEL), &settings)?;
-    let mut segmenter = Segmenter::new(vad, &settings);
-    let recognizer = Recognizer::new(&models.join(STT_MODEL))?;
-    let mut spotter = Spotter::new(&models.join(KWS_MODEL), &setup.wake)?;
     let check = match &setup.owner {
         Some(owner) => Some((SpeakerModel::new(&models.join(SPEAKER_MODEL))?, owner)),
         None => None,
     };
+    let mut attention = Attention::new(models, &setup.wake, check.is_some())?;
     let mut speaker = Speaker::new()?;
     let mic = Mic::open(setup.device.as_deref())?;
     if heard
@@ -177,12 +165,6 @@ fn voice_loop(
         return Ok(());
     }
 
-    let mut transcript = None;
-    // The utterance's audio for the speaker check; bounded by the VAD's longest utterance.
-    let mut utterance: Vec<f32> = Vec::with_capacity(RATE as usize * 15);
-    let mut awake_until: Option<Instant> = None;
-    // The wake word was heard in the current utterance.
-    let mut woke = false;
     loop {
         match say.try_recv() {
             Ok(text) => speaker.say(&text)?,
@@ -193,71 +175,27 @@ fn voice_loop(
             continue;
         };
         if paused.load(Ordering::Relaxed) {
-            transcript = None;
+            attention.drop_utterance();
             continue;
         }
-        let keyword = spotter.push(&chunk);
-        let now = Instant::now();
-        let awake = awake_until.is_some_and(|until| until > now);
-        // Half duplex: only keywords are heard while the assistant speaks.
-        if speaker.is_speaking() {
-            if keyword.is_some() {
-                speaker.stop()?;
-            }
-            if awake || keyword == Some(Keyword::Wake) {
-                awake_until = Some(now + AWAKE);
-            }
-            transcript = None;
-            continue;
-        }
-        if keyword == Some(Keyword::Wake) {
-            awake_until = Some(now + AWAKE);
-            woke = true;
-            // Recognition restarts after the wake word, so the text is the command alone.
-            // shortcut: audio between the wake word's end and its detection is dropped, a
-            // few tens of ms; upgrade to the spotter's timestamps if first words go missing.
-            if segmenter.is_speaking() {
-                transcript = Some(recognizer.start());
-                utterance.clear();
-            }
-        }
-        let mut gone = false;
-        segmenter.push(&chunk, |event| match event {
-            Event::Start => {
-                transcript = Some(recognizer.start());
-                utterance.clear();
-            }
-            Event::Audio(audio) => {
-                if let Some(t) = transcript.as_mut() {
-                    t.feed(audio);
-                    if check.is_some() {
-                        utterance.extend_from_slice(audio);
-                    }
-                }
-            }
-            Event::End => {
-                let text = transcript.take().map(|t| t.finish()).unwrap_or_default();
-                let addressed = awake_until.is_some_and(|until| until > Instant::now());
-                let message = if !text.is_empty() && addressed {
-                    awake_until = Some(Instant::now() + AWAKE);
-                    let score = check.as_ref().map(|(model, owner)| {
-                        model
-                            .voiceprint(&utterance)
-                            .map_or(0.0, |print| owner.score(&print))
-                    });
-                    Some(Heard::Text(text, score))
-                } else if woke {
-                    Some(Heard::Woke)
-                } else {
-                    None
-                };
-                woke = false;
-                if message.is_some_and(|m| heard.blocking_send(m).is_err()) {
-                    gone = true;
-                }
+        let mut interrupt = false;
+        let mut message = None;
+        attention.push(&chunk, speaker.is_speaking(), |event| match event {
+            assist_voice::Heard::Interrupt => interrupt = true,
+            assist_voice::Heard::Woke => message = Some(Heard::Woke),
+            assist_voice::Heard::Text(text, audio) => {
+                let score = check.as_ref().map(|(model, owner)| {
+                    model
+                        .voiceprint(audio)
+                        .map_or(0.0, |print| owner.score(&print))
+                });
+                message = Some(Heard::Text(text.to_owned(), score));
             }
         });
-        if gone {
+        if interrupt {
+            speaker.stop()?;
+        }
+        if message.is_some_and(|m| heard.blocking_send(m).is_err()) {
             return Ok(());
         }
     }
