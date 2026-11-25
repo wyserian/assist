@@ -27,7 +27,7 @@ use assist_proto::{
     Envelope, Hello, JobState, JobSummary, JobUpdate, Kind, Notice, Reply, Rpc, RpcResult,
     Subscribe, Utterance,
 };
-use assist_server::{load_or_create_token, serve, Services};
+use assist_server::{load_or_create_token, serve, Nodes, Services};
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -88,6 +88,8 @@ impl SecretStore for Memory {
 struct Daemon {
     port: u16,
     token: String,
+    /// The hub's iroh address, for device tests.
+    hub: iroh::EndpointAddr,
     dir: PathBuf,
     stop: Option<oneshot::Sender<()>>,
     notices: tokio::sync::broadcast::Sender<Notice>,
@@ -138,6 +140,14 @@ async fn start(name: &str) -> Daemon {
     let port = listener.local_addr().unwrap().port();
     let (stop, stopped) = oneshot::channel::<()>();
     let notices = tokio::sync::broadcast::channel(16).0;
+    let endpoint = local_endpoint().await;
+    let hub = endpoint.addr();
+    let nodes = Nodes {
+        endpoint,
+        peers: Mutex::new(assist_net::Peers::load(&dir).unwrap()),
+        pairing: assist_net::Pairing::default(),
+        name: "test hub".to_owned(),
+    };
     let services = Services {
         facts: Facts::default(),
         notices: notices.clone(),
@@ -150,6 +160,7 @@ async fn start(name: &str) -> Daemon {
         data_dir: dir.clone(),
         user_phrases: Some(dir.join("phrases").join("user.toml")),
         config_file: Some(dir.join("config.toml")),
+        nodes: Some(nodes),
     };
     tokio::spawn(serve(services, listener, async {
         let _ = stopped.await;
@@ -157,6 +168,7 @@ async fn start(name: &str) -> Daemon {
     Daemon {
         port,
         token,
+        hub,
         dir,
         stop: Some(stop),
         notices,
@@ -726,4 +738,91 @@ async fn revoked_clients_are_disconnected() {
     .await;
     assert!(revoked);
     assert!(recv(&mut other).await.is_none(), "connection closed");
+}
+
+/// An iroh endpoint for tests: no relays, reachable on this machine only.
+async fn local_endpoint() -> iroh::Endpoint {
+    iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
+        .alpns(vec![assist_net::ALPN.to_vec()])
+        .bind()
+        .await
+        .unwrap()
+}
+
+/// Connects `device` to the hub, sends `first` and returns the hub's first answer.
+async fn device_says(
+    device: &iroh::Endpoint,
+    hub: &iroh::EndpointAddr,
+    first: Envelope,
+) -> (
+    iroh::endpoint::SendStream,
+    iroh::endpoint::RecvStream,
+    Envelope,
+) {
+    let connection = device.connect(hub.clone(), assist_net::ALPN).await.unwrap();
+    let (mut send, mut recv) = connection.open_bi().await.unwrap();
+    assist_net::send_frame(&mut send, &first.encode())
+        .await
+        .unwrap();
+    let answer = tokio::time::timeout(Duration::from_secs(10), assist_net::recv_frame(&mut recv))
+        .await
+        .expect("no answer within 10 s")
+        .unwrap()
+        .expect("the hub closed the stream");
+    // The connection stays open while its streams live.
+    std::mem::forget(connection);
+    (send, recv, Envelope::decode(&answer).unwrap())
+}
+
+fn pair_request(secret: &str) -> Envelope {
+    let pair = assist_proto::Pair {
+        secret: secret.to_owned(),
+        name: "Test phone".to_owned(),
+        capabilities: vec!["send_sms".to_owned()],
+    };
+    Envelope::new(Kind::Pair, "phone", "hub", pair)
+}
+
+#[tokio::test]
+async fn a_device_pairs_once_and_then_talks_as_the_remote_owner() {
+    let daemon = start("pair").await;
+    let device = local_endpoint().await;
+
+    // A stranger without a code is refused.
+    let (_, _, refused) =
+        device_says(&device, &daemon.hub, pair_request("0123456789abcdef0123")).await;
+    assert_eq!(refused.kind, Kind::RpcResult);
+    let refused: RpcResult = refused.body().unwrap();
+    assert_eq!(refused.error.unwrap().code, "denied");
+
+    // The CLI makes a code; the device pairs with it once.
+    let mut cli = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    let code: String = call(&mut cli, rpc::PAIR_START, ()).await;
+    let ticket = assist_net::Ticket::parse(&code).unwrap();
+    assert_eq!(ticket.hub, daemon.hub.id);
+    let (_, _, paired) = device_says(&device, &daemon.hub, pair_request(&ticket.secret)).await;
+    assert_eq!(paired.kind, Kind::Paired, "{paired:?}");
+    let hub: assist_proto::Paired = paired.body().unwrap();
+    assert_eq!(hub.name, "test hub");
+
+    // Now it talks like a client, with remote-owner trust: a typed shell command asks first.
+    let utterance = Utterance {
+        text: "$ echo hi".to_owned(),
+        speaker_verified: false,
+    };
+    let (_, _, reply) = device_says(
+        &device,
+        &daemon.hub,
+        Envelope::new(Kind::Utterance, "phone", "hub", utterance),
+    )
+    .await;
+    assert_eq!(reply.kind, Kind::Reply, "{reply:?}");
+    let reply: Reply = reply.body().unwrap();
+    assert!(reply.jobs.is_empty() && reply.waiting, "{reply:?}");
+
+    // The used code is gone, and only the CLI may make codes.
+    let other = local_endpoint().await;
+    let (_, _, again) = device_says(&other, &daemon.hub, pair_request(&ticket.secret)).await;
+    assert_eq!(again.kind, Kind::RpcResult);
 }

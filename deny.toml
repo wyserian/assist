@@ -3,6 +3,14 @@
 
 [graph]
 all-features = true
+# The platforms assist ships on; dependencies only other targets use (browser wasm) are not built.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+]
 
 [advisories]
 yanked = "deny"
@@ -70,6 +78,11 @@ allow = ["CC0-1.0"]
 [[licenses.exceptions]]
 crate = "xxhash-rust" # via notify
 allow = ["BSL-1.0"]
+
+# Mozilla's CA certificates, which iroh uses to check its relays over TLS (Phase 5).
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
 
 # Build-time only: sherpa-onnx-sys's build script downloads and unpacks its prebuilt library.
 # All three are permissive; none is linked into a binary.

@@ -58,6 +58,15 @@ impl Principal {
         }
     }
 
+    /// The owner on a paired device (PLAN.md section 3.13), e.g. `node:Pixel 5`.
+    pub fn remote(source: &str) -> Self {
+        Self {
+            source: source.to_owned(),
+            user: "owner".to_owned(),
+            trust: Trust::OwnerRemote,
+        }
+    }
+
     /// Whoever speaks near this machine's microphone; unverified until speaker verification.
     pub fn voice(source: &str) -> Self {
         Self {

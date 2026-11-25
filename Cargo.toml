@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/assist-proto", "crates/assist-core", "crates/assist-actions", "crates/assist-server", "crates/assist-cli", "crates/assist-voice", "crates/assist-ffi"]
+members = ["crates/assist-proto", "crates/assist-core", "crates/assist-actions", "crates/assist-server", "crates/assist-cli", "crates/assist-voice", "crates/assist-ffi", "crates/assist-net"]
 
 [workspace.package]
 version = "0.6.0"
@@ -17,6 +17,7 @@ axum = { version = "0.8", features = ["ws"] }
 anyhow = "1"
 assist-server = { path = "crates/assist-server" }
 assist-core = { path = "crates/assist-core" }
+assist-net = { path = "crates/assist-net" }
 assist-proto = { path = "crates/assist-proto" }
 assist-voice = { path = "crates/assist-voice" }
 clap = { version = "4", features = ["derive"] }
@@ -27,7 +28,11 @@ getrandom = "0.4"
 insta = "1"
 jiff = "1"
 keyring = "4"
+# The network between nodes (Phase 5): QUIC between device keys; ring for TLS.
+iroh = { version = "1.5", default-features = false, features = ["tls-ring"] }
 notify = "9"
+# `assist pair` shows the pairing code as a QR code in the terminal (text renderer only).
+qrcode = { version = "0.15", default-features = false, features = ["std"] }
 # OCR on the phone (assist-actions feature `ocr`): pure Rust, models downloaded with consent.
 ocrs = "0.14"
 rten = "0.28"

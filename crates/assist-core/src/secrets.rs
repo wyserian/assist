@@ -227,9 +227,22 @@ impl Redactor {
     }
 }
 
+/// Compares in time that depends only on the length, not on where the inputs differ, for
+/// tokens and pairing secrets.
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constant_time_eq_compares_bytes() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+    }
 
     #[derive(Default, Clone)]
     struct Memory(Arc<Mutex<BTreeMap<String, String>>>);

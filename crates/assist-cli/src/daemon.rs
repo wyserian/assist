@@ -2,11 +2,12 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use assist_core::private_fs;
-use assist_server::{serve, Services};
+use assist_server::{serve, Nodes, Services};
 use tokio::net::TcpListener;
 
 use crate::setup::{Assistant, Paths};
@@ -29,6 +30,8 @@ pub async fn run(paths: Paths) -> Result<()> {
         .await
         .with_context(|| format!("cannot listen on {bind} (is another daemon running?)"))?;
     let addr = listener.local_addr()?;
+    // The address file says the daemon is ready, so the token clients need exists first.
+    assist_server::load_or_create_token(paths.data())?;
     let addr_file = addr_file(paths.data());
     write_addr(&addr_file, &addr.to_string())?;
     println!(
@@ -36,6 +39,8 @@ pub async fn run(paths: Paths) -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
+    let nodes = start_nodes(paths.data()).await;
+    let endpoint = nodes.as_ref().map(|nodes| nodes.endpoint.clone());
     let notices = tokio::sync::broadcast::channel(NOTICE_QUEUE).0;
     let services = Services {
         scheduler: assistant.scheduler.clone(),
@@ -49,6 +54,7 @@ pub async fn run(paths: Paths) -> Result<()> {
         data_dir: paths.data().clone(),
         user_phrases: Some(paths.phrases_dir().join("user.toml")),
         config_file: Some(paths.config_file().clone()),
+        nodes,
     };
     triggers::start(
         &assistant.config,
@@ -87,8 +93,35 @@ pub async fn run(paths: Paths) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let _ = std::fs::remove_file(&addr_file);
+    if let Some(endpoint) = endpoint {
+        endpoint.close().await;
+    }
     assistant.shutdown().await;
     result.context("server failed")
+}
+
+/// The network for paired devices (PLAN.md section 3.13); without it the daemon still serves
+/// this machine.
+async fn start_nodes(data: &Path) -> Option<Nodes> {
+    let peers = match assist_net::Peers::load(data) {
+        Ok(peers) => peers,
+        Err(err) => {
+            println!("Paired devices are off: {err}");
+            return None;
+        }
+    };
+    match assist_net::endpoint(data).await {
+        Ok(endpoint) => Some(Nodes {
+            endpoint,
+            peers: Mutex::new(peers),
+            pairing: assist_net::Pairing::default(),
+            name: assist_net::host_name(),
+        }),
+        Err(err) => {
+            println!("Paired devices are off: {err}");
+            None
+        }
+    }
 }
 
 /// Writes the listening address, owner-only.

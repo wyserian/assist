@@ -11,15 +11,18 @@ publish.workspace = true
 [dependencies]
 jiff.workspace = true
 assist-core.workspace = true
+assist-net.workspace = true
 assist-proto.workspace = true
 axum.workspace = true
 getrandom.workspace = true
+iroh.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util.workspace = true
 
 [dev-dependencies]
+assist-net.workspace = true
 futures-util.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
 tokio-tungstenite.workspace = true

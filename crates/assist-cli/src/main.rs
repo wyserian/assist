@@ -73,6 +73,8 @@ enum Command {
         /// Job id.
         id: u64,
     },
+    /// Pair a phone: shows a code to scan in the Assist app (works once, for 5 minutes).
+    Pair,
     /// Show what a sentence would do, without doing it.
     Explain {
         /// The sentence.
@@ -172,6 +174,7 @@ fn main() -> Result<ExitCode> {
             Command::Resume { id } => commands::hold(&paths, &id, false).await?,
             Command::Stop { target } => commands::stop(&paths, &target).await?,
             Command::Log { id } => commands::log(&paths, id).await?,
+            Command::Pair => commands::pair(&paths).await?,
             Command::Explain { text } => commands::explain(&paths, &text.join(" ")).await?,
             Command::Ui { print } => commands::ui(&paths, print).await?,
             Command::Secret(SecretCommand::List) => commands::secret_list(&paths).await?,

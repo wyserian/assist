@@ -1,4 +1,5 @@
-//! One WebSocket connection: its own dialog, working directory and job subscriptions.
+//! One client connection (WebSocket, or a paired device over iroh): its own dialog,
+//! working directory and job subscriptions.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -13,6 +14,7 @@ use assist_proto::{
     Envelope, Hello, JobBrief, JobUpdate, Kind, Reply, Rpc, RpcResult, Stream, Subscribe, Utterance,
 };
 use axum::extract::ws::{Message, WebSocket};
+use std::future::Future;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{rpc, AppState, Credential};
@@ -35,13 +37,50 @@ pub(crate) struct Conn {
     jobs: HashSet<JobId>,
 }
 
-pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Credential) {
+/// Whole protocol messages in and out, whatever carries them. `recv` must be cancel-safe:
+/// the connection loop waits on it next to other events.
+pub(crate) trait Transport: Send {
+    /// The next message; `None` once the other side is gone.
+    fn recv(&mut self) -> impl Future<Output = Option<String>> + Send;
+    /// Sends a message; false if the other side is gone.
+    fn send(&mut self, text: String) -> impl Future<Output = bool> + Send;
+    /// Says goodbye.
+    fn close(&mut self) -> impl Future<Output = ()> + Send;
+}
+
+impl Transport for WebSocket {
+    async fn recv(&mut self) -> Option<String> {
+        loop {
+            match WebSocket::recv(self).await {
+                Some(Ok(Message::Text(text))) => return Some(text.as_str().to_owned()),
+                // Pings are answered by axum; binary frames are not part of the protocol.
+                Some(Ok(Message::Binary(_) | Message::Ping(_) | Message::Pong(_))) => {}
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return None,
+            }
+        }
+    }
+
+    async fn send(&mut self, text: String) -> bool {
+        WebSocket::send(self, Message::Text(text.into()))
+            .await
+            .is_ok()
+    }
+
+    async fn close(&mut self) {
+        let _ = WebSocket::send(self, Message::Close(None)).await;
+    }
+}
+
+pub(crate) async fn run(state: AppState, mut transport: impl Transport, credential: Credential) {
     let (id, cancel, mut answers) = state.connect(&credential);
-    let source = match credential {
-        Credential::Token => "cli",
-        Credential::Session(_) => "web",
+    let (source, principal) = match &credential {
+        Credential::Token => ("cli".to_owned(), Principal::local("cli")),
+        Credential::Session(_) => ("web".to_owned(), Principal::local("web")),
+        Credential::Node(name) => {
+            let source = format!("node:{name}");
+            (source.clone(), Principal::remote(&source))
+        }
     };
-    let principal = Principal::local(source);
     let mut events = state.services.scheduler.subscribe();
     let mut conn = Conn {
         dialog: Dialog::new(state.services.engine.get(), principal.clone()),
@@ -50,7 +89,7 @@ pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Cred
         id,
         credential,
         principal,
-        peer: source.to_owned(),
+        peer: source,
         subscribed: false,
         notices: false,
         jobs: HashSet::new(),
@@ -60,11 +99,9 @@ pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Cred
         let outgoing = tokio::select! {
             biased;
             () = cancel.cancelled() => break,
-            frame = socket.recv() => match frame {
-                Some(Ok(Message::Text(text))) => conn.handle(text.as_str()).await,
-                // Pings are answered by axum; binary frames are not part of the protocol.
-                Some(Ok(Message::Binary(_) | Message::Ping(_) | Message::Pong(_))) => Vec::new(),
-                Some(Ok(Message::Close(_)) | Err(_)) | None => break,
+            frame = transport.recv() => match frame {
+                Some(text) => conn.handle(&text).await,
+                None => break,
             },
             event = events.recv() => match event {
                 Ok(event) => conn.event(event).into_iter().collect(),
@@ -87,17 +124,13 @@ pub(crate) async fn run(state: AppState, mut socket: WebSocket, credential: Cred
             }
         };
         for envelope in outgoing {
-            if socket
-                .send(Message::Text(envelope.encode().into()))
-                .await
-                .is_err()
-            {
+            if !transport.send(envelope.encode()).await {
                 conn.state.disconnect(conn.id);
                 return;
             }
         }
     }
-    let _ = socket.send(Message::Close(None)).await;
+    transport.close().await;
     conn.state.disconnect(conn.id);
 }
 
@@ -136,10 +169,15 @@ impl Conn {
                 }
                 Err(err) => vec![bad_request(&message, &err)],
             },
-            // Only the hub sends these; unknown kinds are ignored.
-            Kind::Reply | Kind::JobUpdate | Kind::Notice | Kind::RpcResult | Kind::Unknown => {
-                Vec::new()
-            }
+            // Only the hub sends these, pairing happens before a connection runs, and
+            // unknown kinds are ignored.
+            Kind::Reply
+            | Kind::JobUpdate
+            | Kind::Notice
+            | Kind::RpcResult
+            | Kind::Pair
+            | Kind::Paired
+            | Kind::Unknown => Vec::new(),
         }
     }
 

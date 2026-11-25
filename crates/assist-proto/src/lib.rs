@@ -17,8 +17,8 @@ mod job;
 pub mod rpc;
 
 pub use body::{
-    Hello, JobBrief, JobSummary, JobUpdate, Notice, Reply, Rpc, RpcError, RpcResult, Stream,
-    Subscribe, Utterance,
+    Hello, JobBrief, JobSummary, JobUpdate, Notice, Pair, Paired, Reply, Rpc, RpcError, RpcResult,
+    Stream, Subscribe, Utterance,
 };
 pub use job::{JobState, Lane};
 
@@ -49,6 +49,10 @@ pub enum Kind {
     Rpc,
     /// The answer to an [`Kind::Rpc`].
     RpcResult,
+    /// A new device asks to pair with a one-time secret (PLAN.md section 3.13).
+    Pair,
+    /// The hub accepted a [`Kind::Pair`].
+    Paired,
     /// A kind this build does not know; ignored.
     #[serde(other)]
     Unknown,

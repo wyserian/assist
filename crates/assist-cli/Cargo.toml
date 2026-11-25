@@ -21,6 +21,7 @@ voice = ["dep:assist-voice", "assist-actions/transcribe"]
 anyhow.workspace = true
 assist-actions = { workspace = true, default-features = true }
 assist-core.workspace = true
+assist-net.workspace = true
 assist-proto.workspace = true
 assist-server.workspace = true
 assist-voice = { workspace = true, optional = true }
@@ -32,6 +33,7 @@ notify-rust.workspace = true
 futures-util.workspace = true
 keyring.workspace = true
 open.workspace = true
+qrcode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }

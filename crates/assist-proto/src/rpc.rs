@@ -46,6 +46,10 @@ pub const PHRASES_ADD: &str = "phrases.add";
 /// Every command with its slots. Result: `Vec<CommandEntry>`.
 pub const COMMANDS_LIST: &str = "commands.list";
 
+/// Starts pairing a device: answers a pairing code (`assist-pair:<hub key>:<secret>`), valid
+/// for a few minutes and once. CLI only.
+pub const PAIR_START: &str = "pair.start";
+
 /// A sentence that matched no command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Miss {

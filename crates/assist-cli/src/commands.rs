@@ -228,6 +228,25 @@ pub async fn log(paths: &Paths, id: u64) -> Result<()> {
 }
 
 /// Shows what `text` would do, without doing it.
+/// Asks the daemon for a pairing code and shows it as a QR code and as text.
+pub async fn pair(paths: &Paths) -> Result<()> {
+    let mut client = Client::connect(paths.data(), false).await?;
+    let code: String = client.call(rpc::PAIR_START, ()).await?;
+    let qr = qrcode::QrCode::new(code.as_bytes())?;
+    // Light modules drawn as blocks, so the code reads right on a dark terminal.
+    let picture = qr
+        .render::<qrcode::render::unicode::Dense1x2>()
+        .dark_color(qrcode::render::unicode::Dense1x2::Light)
+        .light_color(qrcode::render::unicode::Dense1x2::Dark)
+        .quiet_zone(true)
+        .build();
+    println!("{picture}");
+    println!("In the Assist app: Link to computer, then scan this code or paste:");
+    println!("{code}");
+    println!("It works once, for 5 minutes.");
+    Ok(())
+}
+
 pub async fn explain(paths: &Paths, text: &str) -> Result<()> {
     let mut client = Client::connect(paths.data(), false).await?;
     let explanation: Option<Explanation> = client

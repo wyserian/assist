@@ -385,6 +385,19 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
                 _ => RpcResult::err("failed", "the client did not take the answer"),
             }
         }
+        rpc::PAIR_START => {
+            // Pairing lets a device in as the owner: only the token holder may start it.
+            if conn.credential != Credential::Token {
+                return Err(RpcResult::err("denied", "only the CLI can pair devices"));
+            }
+            let nodes = services.nodes.as_ref().ok_or_else(|| {
+                RpcResult::err(
+                    "unavailable",
+                    "the network did not start; see the daemon's output",
+                )
+            })?;
+            RpcResult::ok(nodes.pairing.start(nodes.endpoint.id()).encode())
+        }
         rpc::AUTH_OTP => {
             // Only the token holder can let a browser in.
             if conn.credential != Credential::Token {

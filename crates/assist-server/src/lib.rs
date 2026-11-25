@@ -36,10 +36,12 @@ use tokio_util::sync::CancellationToken;
 
 mod auth;
 mod conn;
+mod nodes;
 mod rpc;
 
 pub use auth::{load_or_create_token, Credential};
 use auth::{Auth, Refusal};
+pub use nodes::Nodes;
 
 const INDEX_HTML: &str = include_str!("../../../web/index.html");
 const APP_JS: &str = include_str!("../../../web/app.js");
@@ -72,6 +74,8 @@ pub struct Services {
     pub default_cwd: PathBuf,
     /// Where the token file lives.
     pub data_dir: PathBuf,
+    /// Paired devices over iroh; `None` when the network could not start.
+    pub nodes: Option<Nodes>,
 }
 
 /// Serves `listener` until `shutdown` completes. The listener must be on a loopback address.
@@ -92,6 +96,7 @@ pub async fn serve(
         next_client: AtomicU64::new(1),
         stop: stop.clone(),
     }));
+    tokio::spawn(nodes::accept(state.clone(), stop.clone()));
     let app = Router::new()
         .route("/", get(|| page(INDEX_HTML, "text/html; charset=utf-8")))
         .route(
@@ -172,6 +177,7 @@ impl Shared {
         let (kind, session) = match credential {
             Credential::Token => ("cli", None),
             Credential::Session(session) => ("web", Some(session.clone())),
+            Credential::Node(_) => ("node", None),
         };
         let entry = ClientEntry {
             id,

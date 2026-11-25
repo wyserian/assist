@@ -21,6 +21,26 @@ pub struct Hello {
     pub voice: bool,
 }
 
+/// [`crate::Kind::Pair`]: a new device asks to be paired. Sent over an authenticated
+/// connection, so the hub also knows the device's key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pair {
+    /// The one-time secret from the hub's pairing code.
+    pub secret: String,
+    /// The device's name, e.g. `Pixel 5`.
+    pub name: String,
+    /// What it can do for the hub, e.g. `call`, `send_sms` (commands it runs).
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+/// [`crate::Kind::Paired`]: the hub accepted the device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Paired {
+    /// The hub's name, e.g. its computer name.
+    pub name: String,
+}
+
 /// [`crate::Kind::Utterance`]: text from the user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Utterance {

@@ -8,6 +8,7 @@
 //! - After [`MAX_FAILURES`] failed attempts in a minute, further failures are answered with
 //!   `429 Too Many Requests`. Valid credentials always pass, so the owner is never locked out.
 
+use assist_core::secrets::constant_time_eq;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -35,6 +36,8 @@ pub enum Credential {
     Token,
     /// A browser session cookie.
     Session(String),
+    /// A paired device's key, checked by iroh; the device's name.
+    Node(String),
 }
 
 /// Why a request was refused.
@@ -178,11 +181,6 @@ fn session_cookie(headers: &HeaderMap) -> Option<&str> {
         })
 }
 
-/// Compares in time that depends only on the length, not on where the inputs differ.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
-}
-
 /// `bytes` random bytes from the OS, as lowercase hex.
 pub fn random_hex(bytes: usize) -> io::Result<String> {
     let mut buf = vec![0u8; bytes];
@@ -296,12 +294,5 @@ mod tests {
             7720
         ));
         assert!(!origin_ok(&headers(&[(ORIGIN, "null")]), 7720));
-    }
-
-    #[test]
-    fn constant_time_eq_compares_bytes() {
-        assert!(constant_time_eq(b"abc", b"abc"));
-        assert!(!constant_time_eq(b"abc", b"abd"));
-        assert!(!constant_time_eq(b"abc", b"ab"));
     }
 }

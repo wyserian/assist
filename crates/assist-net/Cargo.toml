@@ -1,0 +1,24 @@
+[package]
+name = "assist-net"
+description = "The network between assist nodes: device keys, pairing and framed messages over iroh."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+assist-core.workspace = true
+assist-proto.workspace = true
+iroh.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
