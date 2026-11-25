@@ -182,6 +182,11 @@ impl Assistant {
         self.woke.clone()
     }
 
+    /// Stops a job, such as a recording from its notification; false if it is not running.
+    pub fn stop(&self, job: u64) -> bool {
+        self.scheduler.cancel(job)
+    }
+
     /// A job's last output lines and whether it has ended.
     pub fn output(&self, job: u64) -> JobOutput {
         let info = self.scheduler.get(job);
@@ -316,6 +321,19 @@ mod tests {
         fn offer_models(&self, feature: models::Feature) -> Result<(), PhoneError> {
             self.log(format!("offer {feature:?}"))
         }
+        fn start_recording(
+            &self,
+            what: phone::Recording,
+            name: String,
+            _job: u64,
+        ) -> Result<String, PhoneError> {
+            self.log(format!("record {what:?} {name}"))?;
+            Ok(format!("Music/Assist/{name}"))
+        }
+        fn stop_recording(&self) -> Result<String, PhoneError> {
+            self.log("stop recording".to_owned())?;
+            Ok("Music/Assist/saved".to_owned())
+        }
     }
 
     /// An assistant in a fresh data directory; remove it with [`finish`].
@@ -440,6 +458,27 @@ mod tests {
         assert_eq!(log[0], "lock");
         assert!(log[1].starts_with("screenshot assist-"));
         assert_eq!(log[2], "offer Ocr");
+        finish(assistant, dir);
+    }
+
+    #[test]
+    fn records_for_a_length_and_stops_when_the_job_is_stopped() {
+        let phone = Arc::new(FakePhone::default());
+        let (assistant, dir) = start("record", Arc::clone(&phone));
+        let timed = assistant.say("record audio for 1s".to_owned());
+        let out = wait(&assistant, timed.jobs[0].id);
+        assert_eq!(out.state, "done", "{out:?}");
+        let job = assistant.say("record screen to demo".to_owned()).jobs[0].id;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(assistant.stop(job));
+        wait(&assistant, job);
+        // The guard stops the recorder from a blocking thread; give it a moment.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let log = phone.0.lock().unwrap().clone();
+        assert!(log[0].starts_with("record Audio assist-"), "{log:?}");
+        assert_eq!(log[1], "stop recording");
+        assert_eq!(log[2], "record Screen demo.mp4");
+        assert_eq!(log[3], "stop recording");
         finish(assistant, dir);
     }
 

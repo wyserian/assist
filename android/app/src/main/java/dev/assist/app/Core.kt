@@ -52,6 +52,9 @@ class Core(private val app: Application) {
     /** Android permissions to ask the user for; the screen shows the system prompt. */
     val permissions = Channel<String>(Channel.CONFLATED)
 
+    /** Screen recording waits for the user's OK; the screen shows Android's capture prompt. */
+    val screenConsents = Channel<Unit>(Channel.CONFLATED)
+
     /** Push-to-talk is recording. */
     var listening by mutableStateOf(false)
         private set
@@ -69,7 +72,12 @@ class Core(private val app: Application) {
         private set
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val phone = AndroidPhone(app, ask = { permissions.trySend(it) }, offer = ::offerModels)
+    private val phone = AndroidPhone(
+        app,
+        ask = { permissions.trySend(it) },
+        offer = ::offerModels,
+        askScreen = { screenConsents.trySend(Unit) },
+    )
     private val speech = TextToSpeech(app) {}
     private var assistant: Assistant? = null
     private var listener: Listener? = null
@@ -115,6 +123,11 @@ class Core(private val app: Application) {
         val line = core.wokeReply()
         show(false, line)
         speak(listOf(line))
+    }
+
+    /** Stops a job, such as a recording from its notification. */
+    fun stopJob(job: ULong) {
+        assistant?.stop(job)
     }
 
     /** Stops a reply being spoken (barge-in). */

@@ -1,6 +1,7 @@
 package dev.assist.app
 
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 
@@ -82,6 +84,15 @@ private fun Chat(model: Core) {
     }
     LaunchedEffect(Unit) {
         for (permission in model.permissions) prompt.launch(arrayOf(permission))
+    }
+    val capture = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        Recordings.consentAnswered(result.resultCode, result.data)
+    }
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        for (ask in model.screenConsents) {
+            capture.launch(context.getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent())
+        }
     }
     LaunchedEffect(model.lines.size) {
         if (model.lines.isNotEmpty()) list.animateScrollToItem(model.lines.lastIndex)

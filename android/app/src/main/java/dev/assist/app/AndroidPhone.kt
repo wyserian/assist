@@ -18,18 +18,21 @@ import uniffi.assist_ffi.Contact
 import uniffi.assist_ffi.Feature
 import uniffi.assist_ffi.Phone
 import uniffi.assist_ffi.PhoneException
+import uniffi.assist_ffi.Recording
 import java.io.File
 import kotlin.math.roundToInt
 
 /**
  * What the core asks the phone to do. Policy and confirmation already happened in the core;
  * this only checks the Android permission, asking for it through [ask] when it is missing,
- * and shows the model download offer through [offer].
+ * shows the model download offer through [offer] and the screen capture prompt through
+ * [askScreen].
  */
 class AndroidPhone(
     private val context: Context,
     private val ask: (String) -> Unit,
     private val offer: (Feature) -> Unit,
+    private val askScreen: () -> Unit,
 ) : Phone {
     override fun openApp(packageName: String) {
         val intent = context.packageManager.getLaunchIntentForPackage(packageName)
@@ -87,6 +90,13 @@ class AndroidPhone(
     }
 
     override fun offerModels(feature: Feature) = offer(feature)
+
+    override fun startRecording(what: Recording, name: String, job: ULong): String {
+        if (what == Recording.AUDIO) need(Manifest.permission.RECORD_AUDIO, "the microphone")
+        return Recordings.start(context, what, name, job, askScreen)
+    }
+
+    override fun stopRecording(): String = Recordings.stop()
 
     private fun shot(): Bitmap = accessibility().capture().getOrElse {
         throw PhoneException.Failed(it.message ?: "No screenshot.")

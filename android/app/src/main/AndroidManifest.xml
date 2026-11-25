@@ -9,6 +9,8 @@
     <!-- The wake word: a foreground service that shows a notification while it listens. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Screen recording, after Android's capture prompt each time. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Only to download the voice models, after the user agrees. -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -56,6 +58,10 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility" />
         </service>
+        <service
+            android:name=".RecordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|mediaProjection" />
         <service
             android:name=".HandsFreeService"
             android:exported="false"

@@ -1,11 +1,12 @@
 //! Phone actions (PLAN.md section 7.2): open an app, call, text, set the volume, lock the
-//! screen, take a screenshot and read the screen. Policy, confirmation, contact matching and
-//! OCR stay in the core; the app does the platform call through [`Phone`], which Kotlin
-//! implements.
+//! screen, take a screenshot, read the screen and record. Policy, confirmation, contact
+//! matching, OCR and how long a recording runs stay in the core; the app does the platform
+//! call through [`Phone`], which Kotlin implements.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use assist_actions::record_spec::{Kind, Spec};
 use assist_core::action::{
     Action, ActionError, BoxFuture, Chunk, DataKind, Input, JobCtx, Lane, Manifest, Output,
     PipeShape,
@@ -34,6 +35,25 @@ pub trait Phone: Send + Sync {
     fn capture(&self) -> Result<String, PhoneError>;
     /// Asks the user to download the models `feature` needs.
     fn offer_models(&self, feature: Feature) -> Result<(), PhoneError>;
+    /// Starts recording `what` into a gallery file named `name` for job `job` (so the app's
+    /// Stop can stop that job); returns where it goes. Screen recording asks the user first.
+    fn start_recording(
+        &self,
+        what: Recording,
+        name: String,
+        job: u64,
+    ) -> Result<String, PhoneError>;
+    /// Stops the recording and saves it; returns where it went.
+    fn stop_recording(&self) -> Result<String, PhoneError>;
+}
+
+/// What to record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum Recording {
+    /// The screen, without sound.
+    Screen,
+    /// The microphone.
+    Audio,
 }
 
 /// Why the phone could not do it.
@@ -71,6 +91,9 @@ pub fn all(phone: &Arc<dyn Phone>) -> Vec<Arc<dyn Action>> {
             phone: Arc::clone(phone),
         }) as Arc<dyn Action>
     })
+    .chain([Arc::new(Record {
+        phone: Arc::clone(phone),
+    }) as Arc<dyn Action>])
     .collect()
 }
 
@@ -92,6 +115,17 @@ static LOCK: Manifest = manifest("lock", &[Capability::Media]);
 static SCREENSHOT: Manifest = printing("screenshot", "file", false);
 // Text on screen is data, never a command.
 static OCR: Manifest = printing("ocr", "source", true);
+// The desktop's shape: runs in the background until its length or a stop.
+static RECORD: Manifest = Manifest {
+    lane: Lane::Background,
+    pipe: PipeShape {
+        input: DataKind::Empty,
+        output: DataKind::Empty,
+        arg: Some("spec"),
+        untrusted: false,
+    },
+    ..manifest("record", &[Capability::Record])
+};
 
 /// A command that prints lines, with the same pipe shape as on the desktop.
 const fn printing(name: &'static str, arg: &'static str, untrusted: bool) -> Manifest {
@@ -155,9 +189,10 @@ impl Request {
                 .map(Self::Volume)
                 .ok_or_else(|| ActionError::new("the volume goes from 0 to 100")),
             "lock" => Ok(Self::Lock),
-            "screenshot" => Ok(Self::Screenshot(screenshot_name(
+            "screenshot" => Ok(Self::Screenshot(gallery_name(
                 ctx.plan.slots.get("file").map(String::as_str),
                 ctx.job,
+                "png",
             ))),
             "ocr" => match ctx.plan.slots.get("source").map(|s| s.trim()) {
                 None | Some("" | "screen" | "the screen") => ctx
@@ -186,17 +221,17 @@ impl Request {
     }
 }
 
-/// The gallery name for a screenshot: the file name the user gave (as a PNG), else
-/// `assist-<job>.png`. Folders are dropped; the app decides where it goes.
-fn screenshot_name(file: Option<&str>, job: u64) -> String {
+/// The gallery name for a file the user asked for: the name they gave (with extension `ext`),
+/// else `assist-<job>.<ext>`. Folders are dropped; the app decides where it goes.
+fn gallery_name(file: Option<&str>, job: u64, ext: &str) -> String {
     let given = file
         .and_then(|f| Path::new(f.trim()).file_name())
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty());
     match given {
-        Some(name) if name.to_ascii_lowercase().ends_with(".png") => name.to_owned(),
-        Some(name) => format!("{name}.png"),
-        None => format!("assist-{job}.png"),
+        Some(name) if name.to_ascii_lowercase().ends_with(&format!(".{ext}")) => name.to_owned(),
+        Some(name) => format!("{name}.{ext}"),
+        None => format!("assist-{job}.{ext}"),
     }
 }
 
@@ -240,15 +275,89 @@ impl Action for PhoneAction {
     }
 }
 
+/// `record screen|audio [for <length>] [to <file>]` on the phone: the core keeps the length
+/// and the stop; the app records into the gallery.
+struct Record {
+    phone: Arc<dyn Phone>,
+}
+
+/// Stops the app's recorder when the job ends any way, also when the scheduler drops the
+/// job on stop, timeout or STOP ALL.
+struct Recorder {
+    phone: Option<Arc<dyn Phone>>,
+}
+
+impl Recorder {
+    /// Stops and saves; returns where it went.
+    async fn finish(mut self) -> Result<String, ActionError> {
+        let Some(phone) = self.phone.take() else {
+            return Err(ActionError::new("the recording already stopped"));
+        };
+        tokio::task::spawn_blocking(move || phone.stop_recording())
+            .await
+            .map_err(|err| ActionError::new(err.to_string()))?
+            .map_err(|err| ActionError::new(err.to_string()))
+    }
+}
+
+impl Drop for Recorder {
+    fn drop(&mut self) {
+        if let Some(phone) = self.phone.take() {
+            // Off this thread: the app's side may block briefly while it saves.
+            drop(tokio::task::spawn_blocking(move || phone.stop_recording()));
+        }
+    }
+}
+
+impl Action for Record {
+    fn manifest(&self) -> &Manifest {
+        &RECORD
+    }
+
+    fn run(&self, ctx: JobCtx, _input: Input, out: Output) -> BoxFuture<Result<(), ActionError>> {
+        let phone = Arc::clone(&self.phone);
+        Box::pin(async move {
+            let spec = Spec::parse(ctx.plan.slots.get("spec").map_or("", String::as_str))
+                .map_err(ActionError::new)?;
+            let (what, ext, said) = match spec.kind {
+                Kind::Screen => (Recording::Screen, "mp4", "the screen"),
+                Kind::Audio => (Recording::Audio, "m4a", "audio"),
+            };
+            let name = gallery_name(spec.file.as_deref(), ctx.job, ext);
+            let job = ctx.job;
+            let starter = Arc::clone(&phone);
+            let target =
+                tokio::task::spawn_blocking(move || starter.start_recording(what, name, job))
+                    .await
+                    .map_err(|err| ActionError::new(err.to_string()))?
+                    .map_err(|err| ActionError::new(err.to_string()))?;
+            let recorder = Recorder { phone: Some(phone) };
+            let _ = out
+                .send(Chunk::Info(format!(
+                    "Recording {said} to {target}; stop the job to end it."
+                )))
+                .await;
+            match spec.length {
+                Some(length) => tokio::time::sleep(length).await,
+                None => ctx.cancel.cancelled().await,
+            }
+            let saved = recorder.finish().await?;
+            let _ = out.send(Chunk::Info(format!("Saved {saved}."))).await;
+            Ok(())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn screenshot_names_drop_folders_and_end_in_png() {
-        assert_eq!(screenshot_name(None, 7), "assist-7.png");
-        assert_eq!(screenshot_name(Some("../../etc/shot"), 7), "shot.png");
-        assert_eq!(screenshot_name(Some("Bill.PNG"), 7), "Bill.PNG");
-        assert_eq!(screenshot_name(Some("  "), 7), "assist-7.png");
+    fn gallery_names_drop_folders_and_keep_the_extension() {
+        assert_eq!(gallery_name(None, 7, "png"), "assist-7.png");
+        assert_eq!(gallery_name(Some("../../etc/shot"), 7, "png"), "shot.png");
+        assert_eq!(gallery_name(Some("Bill.PNG"), 7, "png"), "Bill.PNG");
+        assert_eq!(gallery_name(Some("  "), 7, "png"), "assist-7.png");
+        assert_eq!(gallery_name(Some("demo"), 9, "mp4"), "demo.mp4");
     }
 }
