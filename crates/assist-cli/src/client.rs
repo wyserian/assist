@@ -101,12 +101,7 @@ impl Client {
             params: serde_json::to_value(params)?,
         };
         let sent = self.send(Kind::Rpc, rpc).await?;
-        let result: RpcResult = self.answer(sent).await?.body()?;
-        match (result.result, result.error) {
-            (_, Some(error)) => bail!("{}", error.message),
-            (Some(value), None) => Ok(serde_json::from_value(value)?),
-            (None, None) => bail!("empty answer to {method}"),
-        }
+        decode(method, self.answer(sent).await?.body()?)
     }
 
     /// Asks for `topics` (`jobs`, `notices`) as they happen.
@@ -175,5 +170,31 @@ impl Client {
                 Some(Err(err)) => return Err(err).context("lost the connection to the daemon"),
             }
         }
+    }
+}
+
+/// The value of an rpc answer. A `null` result arrives as no result at all, so a method that
+/// may answer "nothing" (an `Option`) gets `None`; anything else needs a value.
+fn decode<T: DeserializeOwned>(method: &str, answer: RpcResult) -> Result<T> {
+    if let Some(error) = answer.error {
+        bail!("{}", error.message);
+    }
+    let value = answer.result.unwrap_or(serde_json::Value::Null);
+    serde_json::from_value(value).map_err(|err| anyhow!("bad answer to {method}: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_null_answer_is_none_and_a_missing_value_an_error() {
+        let empty = || RpcResult {
+            result: None,
+            error: None,
+        };
+        let none: Option<String> = decode("commands.explain", empty()).unwrap();
+        assert_eq!(none, None);
+        assert!(decode::<String>("commands.explain", empty()).is_err());
     }
 }
