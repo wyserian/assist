@@ -3,7 +3,8 @@
 //! 'background'"); any other rule when its fact condition turns true ("node.battery < 15").
 //! Every message passes the gates in order: muted, the rule's own interval, quiet hours,
 //! and the limit per hour for all rules together. A message held back is dropped, not
-//! queued. Pure: the daemon feeds events, facts and the time.
+//! queued. The rules are pure (they get events, facts and the time); [`spawn`] runs them on a
+//! device, which delivers the messages its own way.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -11,11 +12,13 @@ use std::time::Duration;
 
 use jiff::{SignedDuration, ZonedDateTime};
 
+use tokio::sync::broadcast::error::RecvError;
+
 use crate::condition::Condition;
-use crate::config::{ProactiveConfig, Sink};
+use crate::config::{Config, ProactiveConfig, Sink};
 use crate::facts::{Facts, Value};
 use crate::replies::Replies;
-use crate::scheduler::JobInfo;
+use crate::scheduler::{JobEvent, JobInfo, Scheduler};
 use crate::trigger::FactEdge;
 use assist_proto::JobState;
 
@@ -243,6 +246,50 @@ pub fn parse_quiet(text: &str) -> Option<(i8, i8, i8, i8)> {
     };
     let (from, to) = (time(from)?, time(to)?);
     Some((from.0, from.1, to.0, to.1))
+}
+
+/// How often fact rules are checked.
+const TICK: Duration = Duration::from_secs(15);
+
+/// Runs the rules on the current tokio runtime until the scheduler closes: ended jobs and
+/// facts go in, notices go to `deliver`, which says or shows them on this device. Does
+/// nothing when `config` has no rules.
+pub fn spawn(
+    config: &Config,
+    scheduler: Scheduler,
+    facts: Facts,
+    data: PathBuf,
+    deliver: impl Fn(Notice) + Send + 'static,
+) {
+    if config.proactive.rules.is_empty() {
+        return;
+    }
+    let mut engine = Proactive::new(&config.proactive);
+    let replies = Replies::new(config);
+    tokio::spawn(async move {
+        let mut events = scheduler.subscribe();
+        let mut tick = tokio::time::interval(TICK);
+        loop {
+            let notices = tokio::select! {
+                event = events.recv() => match event {
+                    Ok(JobEvent::State { id, state }) if state.is_finished() => {
+                        let Some(job) = scheduler.get(id) else { continue };
+                        engine.set_muted(load_muted(&data));
+                        engine.on_job(&job, &facts, &replies, &ZonedDateTime::now())
+                    }
+                    Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => return,
+                },
+                _ = tick.tick() => {
+                    engine.set_muted(load_muted(&data));
+                    engine.on_facts(&facts, &replies, &ZonedDateTime::now())
+                }
+            };
+            for notice in notices {
+                deliver(notice);
+            }
+        }
+    });
 }
 
 #[cfg(test)]
