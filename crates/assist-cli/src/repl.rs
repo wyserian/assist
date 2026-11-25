@@ -94,6 +94,7 @@ pub async fn run(paths: Paths) -> Result<()> {
                 println!("\nStopping {stopped} job(s).");
                 break;
             }
+            () = assistant.stop.cancelled() => break,
         }
     }
     repl.wait_for_jobs(&mut events).await;

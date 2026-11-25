@@ -1,0 +1,10 @@
+# The assistant itself. "shut down" stops the daemon (and so `assist listen`) or the shell;
+# anyone may say it, like "stop autopilot".
+
+[shutdown]
+reply = "Shutting down."
+phrases = [
+    "shut (yourself)? down",
+    "shutdown",
+    "turn yourself off",
+]

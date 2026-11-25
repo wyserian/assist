@@ -21,6 +21,7 @@ mod models;
 mod proactive;
 mod repl;
 mod setup;
+mod shutdown;
 mod triggers;
 
 /// Offline-first personal automation and voice assistant.

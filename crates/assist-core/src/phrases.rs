@@ -16,10 +16,14 @@ use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table};
 use crate::config::location;
 
 /// Default English phrases, embedded so the binary works with no files on disk.
-const DEFAULT_EN: [(&str, &str); 9] = [
+const DEFAULT_EN: [(&str, &str); 10] = [
     (
         "apps.toml",
         include_str!("../../../config/phrases/en/apps.toml"),
+    ),
+    (
+        "assistant.toml",
+        include_str!("../../../config/phrases/en/assistant.toml"),
     ),
     (
         "autopilot.toml",

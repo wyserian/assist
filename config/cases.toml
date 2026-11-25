@@ -221,3 +221,17 @@ text = "open banana"
 [[case]]
 text = "lock the phone"
 command = "lock"
+
+[[case]]
+text = "close notepad"
+command = "close_app"
+slots = { app = "notepad" }
+
+[[case]]
+text = "bee shut down"
+command = "shutdown"
+
+[[case]]
+text = "hey bee open notepad"
+command = "open_app"
+slots = { app = "notepad" }

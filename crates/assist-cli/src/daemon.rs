@@ -21,7 +21,7 @@ const NOTICE_QUEUE: usize = 64;
 /// How long shutdown waits for stopped jobs to end.
 const STOP_WAIT: Duration = Duration::from_secs(10);
 
-/// Serves until Ctrl+C, then stops every job and saves history.
+/// Serves until Ctrl+C or "shut down", then stops every job and saves history.
 pub async fn run(paths: Paths) -> Result<()> {
     let assistant = Assistant::start(&paths).await?;
     let bind = assistant.config.server.bind;
@@ -69,8 +69,12 @@ pub async fn run(paths: Paths) -> Result<()> {
         paths.data().clone(),
         notices,
     );
-    let result = serve(services, listener, async {
-        let _ = tokio::signal::ctrl_c().await;
+    let stop = assistant.stop.clone();
+    let result = serve(services, listener, async move {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            () = stop.cancelled() => println!("Shutting down."),
+        }
     })
     .await;
 

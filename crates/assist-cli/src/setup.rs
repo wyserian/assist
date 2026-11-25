@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 use anyhow::{Context, Result};
 use assist_core::assistant::{assemble, Host, Parts};
@@ -124,6 +125,8 @@ pub struct Assistant {
     /// Shared dialog state: matcher, policy, available commands. Replaced when phrases are
     /// added.
     pub engine: Arc<LiveEngine>,
+    /// Cancelled by "shut down"; the daemon and the shell stop when it is.
+    pub stop: CancellationToken,
 }
 
 impl Assistant {
@@ -149,8 +152,11 @@ impl Assistant {
             .map(Arc::new);
         let facts = Facts::default();
         tokio::spawn(sample_facts(facts.clone()));
+        let stop = CancellationToken::new();
+        let mut actions = assist_actions::builtin();
+        actions.push(Arc::new(crate::shutdown::Shutdown { stop: stop.clone() }));
         let host = Host {
-            actions: assist_actions::builtin(),
+            actions,
             phrases: PhraseSet::load_dir(&paths.phrases_dir())?,
             offer_shell: true,
             facts: facts.clone(),
@@ -179,6 +185,7 @@ impl Assistant {
             store,
             scheduler,
             engine,
+            stop,
         })
     }
 

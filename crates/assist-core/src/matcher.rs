@@ -124,6 +124,8 @@ pub struct RuleMatcher {
     lists: BTreeMap<String, Vec<(String, String)>>,
     /// Command -> literal words of its phrases, for [`RuleMatcher::guess`].
     words: BTreeMap<String, BTreeSet<String>>,
+    /// The assistant's name, normalized: "bee, open firefox" means "open firefox".
+    name: String,
 }
 
 impl RuleMatcher {
@@ -171,6 +173,7 @@ impl RuleMatcher {
             types,
             lists,
             words,
+            name: normalize(&config.persona.name),
         })
     }
 
@@ -308,12 +311,17 @@ const LEADING_FILLERS: [&str; 22] = [
 ];
 const TRAILING_FILLERS: [&str; 5] = ["thank you", "for me", "thanks", "please", "now"];
 
-/// `text` without leading and trailing filler words; `None` if there were none.
-fn without_fillers(text: &str) -> Option<&str> {
+/// `text` without leading and trailing filler words or the assistant's `name` in front;
+/// `None` if there were none.
+fn without_fillers<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     let mut rest = text;
     loop {
         let before = rest;
-        for filler in LEADING_FILLERS {
+        let leading = LEADING_FILLERS
+            .iter()
+            .copied()
+            .chain((!name.is_empty()).then_some(name));
+        for filler in leading {
             if let Some(after) = rest.strip_prefix(filler).and_then(|r| r.strip_prefix(' ')) {
                 rest = after;
             }
@@ -335,8 +343,9 @@ impl Matcher for RuleMatcher {
     /// is kept; then without filler words around it.
     fn best(&self, text: &str) -> Option<Intent> {
         let normalized = normalize(text);
-        self.best_normalized(&normalized)
-            .or_else(|| without_fillers(&normalized).and_then(|core| self.best_normalized(core)))
+        self.best_normalized(&normalized).or_else(|| {
+            without_fillers(&normalized, &self.name).and_then(|core| self.best_normalized(core))
+        })
     }
 }
 
