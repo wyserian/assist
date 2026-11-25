@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The wake word: a foreground service that shows a notification while it listens. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Only to download the voice models, after the user agrees. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -19,6 +23,7 @@
     </queries>
 
     <application
+        android:name=".AssistApp"
         android:allowBackup="false"
         android:label="Assist"
         android:supportsRtl="true"
@@ -26,11 +31,21 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Lets the user pick Assist as the phone's digital assistant app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
+        <service
+            android:name=".HandsFreeService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 </manifest>

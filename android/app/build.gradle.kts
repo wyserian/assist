@@ -41,7 +41,6 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)
     implementation(libs.activity.compose)
-    implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.coroutines.android)
     // The UniFFI Kotlin bindings call the Rust core through JNA.
     implementation("${libs.jna.get()}@aar")

@@ -1,20 +1,23 @@
-//! Push-to-talk for the app (PLAN.md Phase 4 step 3): the app records the microphone and
-//! pushes 16 kHz audio; the core finds the utterance (Silero VAD) and transcribes it (the
-//! desktop's streaming model). Models are downloaded by the app and checked and unpacked
-//! here against the pinned digests in `assist_voice::MODELS`.
+//! Voice for the app (PLAN.md Phase 4 step 3): the app records the microphone and pushes
+//! 16 kHz audio. [`Listener`] is push-to-talk: it finds one utterance (Silero VAD) and
+//! transcribes it (the desktop's streaming model). [`HandsFree`] adds the wake word through
+//! `assist_voice::Attention`, as `assist listen` does. Models are downloaded by the app and
+//! checked and unpacked here against the pinned digests in `assist_voice::MODELS`.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use assist_core::private_fs::create_dir;
 use assist_voice::{
-    Event, Recognizer, Segmenter, Silero, Transcript, VadSettings, MODELS, STT_MODEL, VAD_MODEL,
+    Attention, Event, Heard, Recognizer, Segmenter, Silero, Transcript, VadSettings, KWS_MODEL,
+    MODELS, STT_MODEL, VAD_MODEL,
 };
 
 use crate::AssistError;
 
-/// The models push-to-talk needs.
-const WANTED: [&str; 2] = [VAD_MODEL, STT_MODEL];
+/// The models push-to-talk needs, then the wake word's.
+const PUSH_TO_TALK: [&str; 2] = [VAD_MODEL, STT_MODEL];
+const HANDS_FREE: [&str; 3] = [VAD_MODEL, STT_MODEL, KWS_MODEL];
 
 /// A model the app still has to download.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -33,10 +36,16 @@ fn models_dir(data_dir: &str) -> PathBuf {
     Path::new(data_dir).join("models")
 }
 
-/// The voice models missing from `data_dir`.
+/// The voice models missing from `data_dir` for push-to-talk, or with `hands_free` also for
+/// the wake word.
 #[uniffi::export]
-pub fn missing_models(data_dir: String) -> Vec<ModelFile> {
-    assist_voice::missing(&models_dir(&data_dir), &WANTED)
+pub fn missing_models(data_dir: String, hands_free: bool) -> Vec<ModelFile> {
+    let wanted: &[&str] = if hands_free {
+        &HANDS_FREE
+    } else {
+        &PUSH_TO_TALK
+    };
+    assist_voice::missing(&models_dir(&data_dir), wanted)
         .into_iter()
         .map(|m| ModelFile {
             name: m.installed.to_owned(),
@@ -53,7 +62,7 @@ pub fn missing_models(data_dir: String) -> Vec<ModelFile> {
 pub fn install_model(data_dir: String, name: String, download: String) -> Result<(), AssistError> {
     let model = MODELS
         .iter()
-        .find(|m| m.installed == name && WANTED.contains(&m.installed))
+        .find(|m| m.installed == name && HANDS_FREE.contains(&m.installed))
         .ok_or_else(|| AssistError::Voice(format!("{name:?} is not a voice model")))?;
     let dir = models_dir(&data_dir);
     create_dir(&dir).map_err(|err| AssistError::Voice(format!("{}: {err}", dir.display())))?;
@@ -141,6 +150,58 @@ impl Listener {
     }
 }
 
+/// What [`HandsFree::push`] heard.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum Hearing {
+    /// The wake word or "stop" while the app speaks: stop speaking.
+    Interrupt,
+    /// The wake word alone; answer with `Assistant::woke_reply`.
+    Woke,
+    /// A request after the wake word, for `Assistant::hear`.
+    Text {
+        /// What was said.
+        text: String,
+    },
+}
+
+/// Listens all the time for the wake word, then for requests while awake.
+#[derive(uniffi::Object)]
+pub struct HandsFree {
+    attention: Mutex<Attention>,
+}
+
+#[uniffi::export]
+impl HandsFree {
+    /// Loads the models from `data_dir` and listens for `wake` (see
+    /// `Assistant::wake_phrases`); slow, so not on the UI thread.
+    #[uniffi::constructor]
+    pub fn new(data_dir: String, wake: Vec<String>) -> Result<Arc<Self>, AssistError> {
+        let attention = Attention::new(&models_dir(&data_dir), &wake, false)
+            .map_err(|err| AssistError::Voice(err.to_string()))?;
+        Ok(Arc::new(Self {
+            attention: Mutex::new(attention),
+        }))
+    }
+
+    /// Feeds 16 kHz mono samples; `speaking` says the app is speaking a reply now.
+    pub fn push(&self, samples: Vec<f32>, speaking: bool) -> Vec<Hearing> {
+        let mut heard = Vec::new();
+        self.attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(&samples, speaking, |event| {
+                heard.push(match event {
+                    Heard::Interrupt => Hearing::Interrupt,
+                    Heard::Woke => Hearing::Woke,
+                    Heard::Text(text, _) => Hearing::Text {
+                        text: text.to_owned(),
+                    },
+                });
+            });
+        heard
+    }
+}
+
 /// A fresh utterance detector; loading the small VAD model takes milliseconds.
 fn segmenter(models: &Path) -> Result<Segmenter<Silero>, assist_voice::VoiceError> {
     let settings = VadSettings::default();
@@ -163,7 +224,12 @@ mod tests {
     fn lists_the_push_to_talk_models_and_refuses_others() {
         let dir = scratch("models");
         let data = dir.display().to_string();
-        let names: Vec<_> = missing_models(data.clone())
+        let hands_free: Vec<_> = missing_models(data.clone(), true)
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        assert_eq!(hands_free, [VAD_MODEL, STT_MODEL, KWS_MODEL]);
+        let names: Vec<_> = missing_models(data.clone(), false)
             .into_iter()
             .map(|m| m.name)
             .collect();

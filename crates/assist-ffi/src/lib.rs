@@ -1,7 +1,8 @@
 //! The assist core for the Android app (PLAN.md Phase 4), through UniFFI: the same engine,
 //! dialog, policy and scheduler as the desktop, built by `assistant::assemble`. Kotlin calls
-//! [`Assistant::say`] and shows the answer; jobs run on the core's own tokio runtime. Phone
-//! actions call back into the app through [`phone::Phone`].
+//! [`Assistant::say`] for typed and push-to-talk input and [`Assistant::hear`] for the wake
+//! word, and shows the answer; jobs run on the core's own tokio runtime. Phone actions call
+//! back into the app through [`phone::Phone`].
 
 pub mod phone;
 pub mod voice;
@@ -14,6 +15,7 @@ use assist_core::assistant::{assemble, Host};
 use assist_core::config::Config;
 use assist_core::dialog::{Dialog, LiveEngine};
 use assist_core::policy::Principal;
+use assist_core::replies::{Line, Replies};
 use assist_core::scheduler::Scheduler;
 use assist_core::store::Store;
 
@@ -78,16 +80,35 @@ pub struct Job {
     pub title: String,
 }
 
-/// One conversation with the core on this device.
+/// The core on this device.
 #[derive(uniffi::Object)]
 pub struct Assistant {
     runtime: tokio::runtime::Runtime,
     scheduler: Scheduler,
     engine: Arc<LiveEngine>,
     store: Store,
-    dialog: Mutex<Dialog>,
-    owner: Principal,
+    /// Typed and push-to-talk: the owner on their own unlocked phone.
+    typed: Conversation,
+    /// The wake word: whoever speaks near the phone (voice trust, PLAN.md section 3.6).
+    spoken: Conversation,
     home: PathBuf,
+    wake_phrases: Vec<String>,
+    woke: String,
+}
+
+/// A dialog and who it speaks for.
+struct Conversation {
+    dialog: Mutex<Dialog>,
+    principal: Principal,
+}
+
+impl Conversation {
+    fn new(engine: &LiveEngine, principal: Principal) -> Self {
+        Self {
+            dialog: Mutex::new(Dialog::new(engine.get(), principal.clone())),
+            principal,
+        }
+    }
 }
 
 #[uniffi::export]
@@ -111,6 +132,8 @@ impl Assistant {
             .map_err(|e| failed(&e))?;
         let mut config = Config::from_toml(&config_toml).map_err(|e| failed(&e))?;
         add_phone_lists(&mut config, contacts, apps);
+        let wake_phrases = config.persona.wake_phrases();
+        let woke = Replies::new(&config).line(Line::Wake, &[]);
         let config = Arc::new(config);
         let home = PathBuf::from(data_dir);
         let mut actions = assist_actions::builtin();
@@ -124,51 +147,38 @@ impl Assistant {
             let _inside = runtime.enter();
             assemble(config, &home, host).map_err(|e| failed(&e))?
         };
-        let owner = Principal::local("android");
         Ok(Arc::new(Self {
-            dialog: Mutex::new(Dialog::new(parts.engine.get(), owner.clone())),
+            typed: Conversation::new(&parts.engine, Principal::local("android")),
+            spoken: Conversation::new(&parts.engine, Principal::voice("android")),
             runtime,
             scheduler: parts.scheduler,
             engine: parts.engine,
             store: parts.store,
-            owner,
             home,
+            wake_phrases,
+            woke,
         }))
     }
 
-    /// Handles what the user typed or said and starts the jobs it asks for.
+    /// Handles what the owner typed or said with push-to-talk and starts the jobs it asks for.
     pub fn say(&self, text: String) -> Answer {
-        let engine = self.engine.get();
-        let reply = {
-            let mut dialog = self.dialog.lock().unwrap_or_else(PoisonError::into_inner);
-            dialog.use_engine(Arc::clone(&engine));
-            dialog.handle(&self.owner, &text, Instant::now())
-        };
-        let waiting = self
-            .dialog
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_waiting();
-        let mut answer = Answer {
-            say: reply.say,
-            jobs: Vec::new(),
-            waiting,
-        };
-        let _inside = self.runtime.enter();
-        for pipe in reply.run {
-            let run = engine.submission(pipe);
-            match self
-                .scheduler
-                .submit_pipe(run, self.owner.clone(), self.home.clone())
-            {
-                Ok(ids) => answer.jobs.extend(ids.into_iter().map(|id| Job {
-                    id,
-                    title: self.scheduler.get(id).map(|j| j.title).unwrap_or_default(),
-                })),
-                Err(err) => answer.say.push(err.to_string()),
-            }
-        }
-        answer
+        self.converse(&self.typed, &text, false)
+    }
+
+    /// Handles what was heard after the wake word. `vouched` is true when the owner stands
+    /// behind it, such as a tap on Yes on screen; a spoken "yes" alone does not confirm.
+    pub fn hear(&self, text: String, vouched: bool) -> Answer {
+        self.converse(&self.spoken, &text, vouched)
+    }
+
+    /// The wake phrases from `[persona]`, for the hands-free listener.
+    pub fn wake_phrases(&self) -> Vec<String> {
+        self.wake_phrases.clone()
+    }
+
+    /// What to say when the wake word comes alone ("Yes, Prime?").
+    pub fn woke_reply(&self) -> String {
+        self.woke.clone()
     }
 
     /// A job's last output lines and whether it has ended.
@@ -184,6 +194,38 @@ impl Assistant {
             ended: info.as_ref().is_none_or(|j| j.state.is_finished()),
             state: info.map_or_else(|| "gone".to_owned(), |j| j.state.as_str().to_owned()),
         }
+    }
+}
+
+impl Assistant {
+    fn converse(&self, with: &Conversation, text: &str, vouched: bool) -> Answer {
+        let engine = self.engine.get();
+        let (reply, waiting) = {
+            let mut dialog = with.dialog.lock().unwrap_or_else(PoisonError::into_inner);
+            dialog.use_engine(Arc::clone(&engine));
+            let reply = dialog.handle_vouched(&with.principal, text, vouched, Instant::now());
+            (reply, dialog.is_waiting())
+        };
+        let mut answer = Answer {
+            say: reply.say,
+            jobs: Vec::new(),
+            waiting,
+        };
+        let _inside = self.runtime.enter();
+        for pipe in reply.run {
+            let run = engine.submission(pipe);
+            match self
+                .scheduler
+                .submit_pipe(run, with.principal.clone(), self.home.clone())
+            {
+                Ok(ids) => answer.jobs.extend(ids.into_iter().map(|id| Job {
+                    id,
+                    title: self.scheduler.get(id).map(|j| j.title).unwrap_or_default(),
+                })),
+                Err(err) => answer.say.push(err.to_string()),
+            }
+        }
+        answer
     }
 }
 
@@ -326,6 +368,21 @@ mod tests {
             *phone.0.lock().unwrap(),
             ["call 555 0100", "sms 555 0100 running late"]
         );
+        finish(assistant, dir);
+    }
+
+    #[test]
+    fn a_wake_word_call_needs_a_yes_on_screen() {
+        let phone = Arc::new(FakePhone::default());
+        let (assistant, dir) = start("voice", Arc::clone(&phone));
+        assert!(assistant.hear("call mom".to_owned(), false).waiting);
+        let spoken = assistant.hear("yes".to_owned(), false);
+        assert!(spoken.jobs.is_empty() && spoken.waiting, "{spoken:?}");
+        assert!(spoken.say[0].contains("Confirm on screen"), "{spoken:?}");
+        let tapped = assistant.hear("yes".to_owned(), true);
+        wait(&assistant, tapped.jobs[0].id);
+        assert_eq!(*phone.0.lock().unwrap(), ["call 555 0100"]);
+        assert!(!assistant.wake_phrases().is_empty());
         finish(assistant, dir);
     }
 

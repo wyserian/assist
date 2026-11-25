@@ -1,5 +1,6 @@
 package dev.assist.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,8 +28,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -42,24 +45,36 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 
-/** The chat screen: type to the assistant, read its answers. */
+/** The chat screen: type or talk to the assistant, read its answers. */
 class MainActivity : ComponentActivity() {
+    private val core get() = (application as AssistApp).core
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             val colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
             MaterialTheme(colorScheme = colors) {
-                Surface(Modifier.fillMaxSize()) { Chat(viewModel()) }
+                Surface(Modifier.fillMaxSize()) { Chat(core) }
             }
         }
+        if (savedInstanceState == null) assist(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        assist(intent)
+    }
+
+    /** Opened as the phone's assistant (long press on home, assistant gesture): start listening. */
+    private fun assist(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_ASSIST && !core.listening) core.talk()
     }
 }
 
 @Composable
-private fun Chat(model: ChatViewModel) {
+private fun Chat(model: Core) {
     var input by rememberSaveable { mutableStateOf("") }
     val list = rememberLazyListState()
     val prompt = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { answers ->
@@ -79,12 +94,22 @@ private fun Chat(model: ChatViewModel) {
         }
     }
     Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Listen for the wake word", Modifier.weight(1f))
+            Switch(checked = model.handsFree, onCheckedChange = { model.toggleHandsFree() })
+        }
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
             state = list,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(model.lines) { Bubble(it) }
+        }
+        if (model.confirming) {
+            Row(Modifier.padding(bottom = 8.dp)) {
+                Button(onClick = { model.confirmSpoken(true) }) { Text("Yes") }
+                OutlinedButton(onClick = { model.confirmSpoken(false) }, Modifier.padding(start = 8.dp)) { Text("No") }
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(

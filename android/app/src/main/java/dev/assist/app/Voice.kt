@@ -59,9 +59,23 @@ fun download(model: ModelFile, dataDir: File, cacheDir: File) {
  * nothing was understood). Stops after [WAIT_MS] without speech or when the caller's
  * coroutine is cancelled. Needs the microphone permission.
  */
-@SuppressLint("MissingPermission")
 suspend fun listenOnce(listener: Listener): String {
     listener.reset()
+    var silentMs = 0
+    return record { chunk ->
+        listener.push(chunk)?.let { return@record it }
+        silentMs = if (listener.isSpeaking()) 0 else silentMs + chunk.size * 1000 / RATE
+        if (silentMs > WAIT_MS) "" else null
+    }
+}
+
+/**
+ * Records the microphone in 100 ms chunks of 16 kHz mono audio until [onChunk] returns a
+ * result or the caller's coroutine is cancelled. Blocking reads: call on Dispatchers.IO.
+ * Needs the microphone permission.
+ */
+@SuppressLint("MissingPermission")
+suspend fun <T : Any> record(onChunk: (List<Float>) -> T?): T {
     val size = maxOf(AudioRecord.getMinBufferSize(RATE, MONO, FLOAT), CHUNK * 4 * 4)
     val recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, MONO, FLOAT, size)
     if (recorder.state != AudioRecord.STATE_INITIALIZED) {
@@ -71,14 +85,11 @@ suspend fun listenOnce(listener: Listener): String {
     try {
         recorder.startRecording()
         val chunk = FloatArray(CHUNK)
-        var silentMs = 0
         while (true) {
             currentCoroutineContext().ensureActive()
             val n = recorder.read(chunk, 0, CHUNK, AudioRecord.READ_BLOCKING)
             if (n < 0) throw IOException("The microphone stopped ($n).")
-            listener.push(chunk.copyOf(n).toList())?.let { return it }
-            silentMs = if (listener.isSpeaking()) 0 else silentMs + n * 1000 / RATE
-            if (silentMs > WAIT_MS) return ""
+            onChunk(chunk.copyOf(n).toList())?.let { return it }
         }
     } finally {
         recorder.stop()
