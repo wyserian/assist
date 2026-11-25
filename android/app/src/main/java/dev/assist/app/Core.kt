@@ -116,6 +116,23 @@ class Core(private val app: Application) {
         }
         facts.start()
         start()
+        keepLinked()
+    }
+
+    /**
+     * Keeps the connection to the paired computer open while the app runs, so the computer
+     * can run phone commands here ("text mom" said to it). Unreachable is not an error.
+     */
+    private fun keepLinked() {
+        scope.launch {
+            while (true) {
+                val core = assistant
+                if (core != null && computer != null) {
+                    withContext(Dispatchers.IO) { runCatching { core.connectComputer() } }
+                }
+                delay(LINK_CHECK_MS)
+            }
+        }
     }
 
     /** Called with the user's answer to a permission prompt. */
@@ -390,6 +407,7 @@ class Core(private val app: Application) {
         const val MAX_CONFIG = 64 * 1024
         const val MAX_LINES = 200
         const val DEFAULT_AWAKE_S = 60u
+        const val LINK_CHECK_MS = 15_000L
         const val POLL_MS = 200L
     }
 }

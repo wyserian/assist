@@ -36,8 +36,13 @@ pub enum Credential {
     Token,
     /// A browser session cookie.
     Session(String),
-    /// A paired device's key, checked by iroh; the device's name.
-    Node(String),
+    /// A paired device, its key checked by iroh.
+    Node {
+        /// Its name, e.g. `CPH2569`.
+        name: String,
+        /// Its key.
+        id: String,
+    },
 }
 
 /// Why a request was refused.

@@ -11,11 +11,13 @@ use assist_core::dialog::Dialog;
 use assist_core::policy::{Principal, Trust};
 use assist_core::scheduler::{JobEvent, JobId, JobState};
 use assist_proto::{
-    Envelope, Hello, JobBrief, JobUpdate, Kind, Reply, Rpc, RpcResult, Stream, Subscribe, Utterance,
+    Envelope, Hello, JobBrief, JobUpdate, Kind, Ran, Reply, Rpc, RpcResult, Stream, Subscribe,
+    Utterance,
 };
 use axum::extract::ws::{Message, WebSocket};
 use std::future::Future;
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::mpsc;
 
 use crate::{rpc, AppState, Credential};
 
@@ -71,12 +73,19 @@ impl Transport for WebSocket {
     }
 }
 
-pub(crate) async fn run(state: AppState, mut transport: impl Transport, credential: Credential) {
+/// Serves one client until it leaves or is revoked. `outbox` carries messages the hub sends
+/// a paired device unasked (commands to run).
+pub(crate) async fn run(
+    state: AppState,
+    mut transport: impl Transport,
+    credential: Credential,
+    mut outbox: Option<mpsc::Receiver<Envelope>>,
+) {
     let (id, cancel, mut answers) = state.connect(&credential);
     let (source, principal) = match &credential {
         Credential::Token => ("cli".to_owned(), Principal::local("cli")),
         Credential::Session(_) => ("web".to_owned(), Principal::local("web")),
-        Credential::Node(name) => {
+        Credential::Node { name, .. } => {
             let source = format!("node:{name}");
             (source.clone(), Principal::remote(&source))
         }
@@ -115,6 +124,7 @@ pub(crate) async fn run(state: AppState, mut transport: impl Transport, credenti
                 Ok(_) | Err(RecvError::Lagged(_)) => Vec::new(),
                 Err(RecvError::Closed) => break,
             },
+            Some(envelope) = next(&mut outbox) => vec![envelope],
             Some(answer) = answers.recv() => {
                 // Answered elsewhere: handled as if this client typed it, so its jobs run
                 // in its directory and it follows them.
@@ -169,6 +179,16 @@ impl Conn {
                 }
                 Err(err) => vec![bad_request(&message, &err)],
             },
+            Kind::Ran => {
+                if let (Credential::Node { id, .. }, Ok(ran)) =
+                    (&self.credential, message.body::<Ran>())
+                {
+                    if let Some(nodes) = self.state.services.nodes.as_ref() {
+                        nodes.devices.finished(id, ran);
+                    }
+                }
+                Vec::new()
+            }
             // Only the hub sends these, pairing happens before a connection runs, and
             // unknown kinds are ignored.
             Kind::Reply
@@ -177,12 +197,16 @@ impl Conn {
             | Kind::RpcResult
             | Kind::Pair
             | Kind::Paired
+            | Kind::Run
             | Kind::Unknown => Vec::new(),
         }
     }
 
     fn hello(&mut self, message: &Envelope, hello: Hello) -> Envelope {
         self.state.name_client(self.id, &hello.client);
+        if matches!(self.credential, Credential::Node { .. }) && !hello.contacts.is_empty() {
+            self.learn_contacts(hello.contacts);
+        }
         if let Some(cwd) = hello.cwd.map(PathBuf::from).filter(|p| p.is_dir()) {
             self.cwd = cwd;
         }
@@ -196,8 +220,21 @@ impl Conn {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             cwd: None,
             voice: false,
+            contacts: Vec::new(),
         };
         message.answer(Kind::Hello, HUB, ours)
+    }
+
+    /// A paired phone's contact names join the hub's `[contacts]`, so "text mom" matches
+    /// here; the numbers stay on the phone, which runs the command.
+    fn learn_contacts(&self, names: Vec<String>) {
+        let live = &self.state.services.engine;
+        let engine = live.get();
+        let mut config = engine.config().clone();
+        config.add_found_contacts(names.into_iter().map(|name| (name, String::new())));
+        if let Ok(updated) = engine.with_config(Arc::new(config)) {
+            live.set(Arc::new(updated));
+        }
     }
 
     fn utterance(&mut self, message: &Envelope, utterance: &Utterance) -> Envelope {
@@ -289,4 +326,12 @@ fn bad_request(message: &Envelope, err: &serde_json::Error) -> Envelope {
         HUB,
         RpcResult::err("bad_request", err.to_string()),
     )
+}
+
+/// The next message queued for a device; never resolves for a client without a queue.
+async fn next(outbox: &mut Option<mpsc::Receiver<Envelope>>) -> Option<Envelope> {
+    match outbox {
+        Some(queue) => queue.recv().await,
+        None => std::future::pending().await,
+    }
 }

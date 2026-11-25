@@ -64,6 +64,7 @@ impl Client {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             cwd,
             voice,
+            contacts: Vec::new(),
         };
         let sent = client.send(Kind::Hello, hello).await?;
         client.answer(sent).await?;

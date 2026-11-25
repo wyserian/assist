@@ -36,11 +36,13 @@ use tokio_util::sync::CancellationToken;
 
 mod auth;
 mod conn;
+mod devices;
 mod nodes;
 mod rpc;
 
 pub use auth::{load_or_create_token, Credential};
 use auth::{Auth, Refusal};
+pub use devices::{proxies, Devices};
 pub use nodes::Nodes;
 
 const INDEX_HTML: &str = include_str!("../../../web/index.html");
@@ -177,7 +179,7 @@ impl Shared {
         let (kind, session) = match credential {
             Credential::Token => ("cli", None),
             Credential::Session(session) => ("web", Some(session.clone())),
-            Credential::Node(_) => ("node", None),
+            Credential::Node { .. } => ("node", None),
         };
         let entry = ClientEntry {
             id,
@@ -293,7 +295,7 @@ async fn websocket(
     match state.auth.check(&headers) {
         Ok(credential) => upgrade
             .max_message_size(MAX_FRAME)
-            .on_upgrade(move |socket| conn::run(state, socket, credential)),
+            .on_upgrade(move |socket| conn::run(state, socket, credential, None)),
         Err(refusal) => refused(refusal),
     }
 }

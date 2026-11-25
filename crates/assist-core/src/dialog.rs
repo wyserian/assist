@@ -550,8 +550,9 @@ impl Engine {
             Some(SlotType::Text) => format!("{value:?}"),
             Some(SlotType::List(list)) if list == "contacts" => {
                 match self.config.contacts.get(value) {
-                    Some(number) => format!("{value} ({number})"),
-                    None => value.to_owned(),
+                    // A paired phone's contact has its number only on the phone.
+                    Some(number) if !number.is_empty() => format!("{value} ({number})"),
+                    _ => value.to_owned(),
                 }
             }
             _ => value.to_owned(),

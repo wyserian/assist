@@ -2,7 +2,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -39,7 +39,7 @@ pub async fn run(paths: Paths) -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let nodes = start_nodes(paths.data()).await;
+    let nodes = start_nodes(paths.data(), Arc::clone(&assistant.devices)).await;
     let endpoint = nodes.as_ref().map(|nodes| nodes.endpoint.clone());
     let notices = tokio::sync::broadcast::channel(NOTICE_QUEUE).0;
     let services = Services {
@@ -102,7 +102,7 @@ pub async fn run(paths: Paths) -> Result<()> {
 
 /// The network for paired devices (PLAN.md section 3.13); without it the daemon still serves
 /// this machine.
-async fn start_nodes(data: &Path) -> Option<Nodes> {
+async fn start_nodes(data: &Path, devices: Arc<assist_server::Devices>) -> Option<Nodes> {
     let peers = match assist_net::Peers::load(data) {
         Ok(peers) => peers,
         Err(err) => {
@@ -116,6 +116,7 @@ async fn start_nodes(data: &Path) -> Option<Nodes> {
             peers: Mutex::new(peers),
             pairing: assist_net::Pairing::default(),
             name: assist_net::host_name(),
+            devices,
         }),
         Err(err) => {
             println!("Paired devices are off: {err}");

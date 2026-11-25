@@ -2,7 +2,7 @@
 //! the same [`conn::run`] as the CLI, with remote-owner trust; an unknown key may only pair,
 //! with the one-time secret from `assist pair`, and is then disconnected.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use assist_net::{Endpoint, Pairing, Peers};
@@ -12,11 +12,11 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::conn::{self, Transport, HUB};
-use crate::{AppState, Credential};
+use crate::{AppState, Credential, Devices};
 
 /// How long a new device has to send its pairing request.
 const PAIR_WAIT: Duration = Duration::from_secs(30);
-/// Messages read ahead from a device before the connection handles them.
+/// Messages read ahead from a device before the connection handles them, and queued for it.
 const READ_AHEAD: usize = 16;
 
 /// What the daemon needs to accept devices.
@@ -29,6 +29,8 @@ pub struct Nodes {
     pub pairing: Pairing,
     /// This hub's name for devices.
     pub name: String,
+    /// Connected devices, for running commands on them; shared with the hub's actions.
+    pub devices: Arc<Devices>,
 }
 
 /// Accepts device connections until `stop`.
@@ -82,7 +84,16 @@ async fn handle(state: AppState, connection: Connection) {
                 send,
                 connection,
             };
-            conn::run(state, transport, Credential::Node(peer.name)).await;
+            let (outbox, queued) = mpsc::channel(READ_AHEAD);
+            nodes
+                .devices
+                .connect(&peer.id, &peer.name, peer.capabilities.clone(), outbox);
+            let credential = Credential::Node {
+                name: peer.name,
+                id: peer.id.clone(),
+            };
+            conn::run(state.clone(), transport, credential, Some(queued)).await;
+            nodes.devices.disconnect(&peer.id);
         }
         None => {
             let first = tokio::time::timeout(PAIR_WAIT, assist_net::recv_frame(&mut recv)).await;

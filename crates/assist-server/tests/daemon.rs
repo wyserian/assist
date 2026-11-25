@@ -27,7 +27,7 @@ use assist_proto::{
     Envelope, Hello, JobState, JobSummary, JobUpdate, Kind, Notice, Reply, Rpc, RpcResult,
     Subscribe, Utterance,
 };
-use assist_server::{load_or_create_token, serve, Nodes, Services};
+use assist_server::{load_or_create_token, proxies, serve, Devices, Nodes, Services};
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -111,8 +111,11 @@ async fn start(name: &str) -> Daemon {
     let (store, _) = Store::open(&dir, &config.jobs).unwrap();
     let secrets = Arc::new(Secrets::open(Box::new(Memory::default()), &dir).unwrap());
     let audit = Audit::open(&dir.join("audit")).unwrap();
+    let devices = Arc::new(Devices::default());
+    let mut actions: Vec<Arc<dyn Action>> = vec![Arc::new(Echo)];
+    actions.extend(proxies(&devices, &[SHELL]));
     let scheduler = Scheduler::new(
-        vec![Arc::new(Echo)],
+        actions,
         Arc::clone(&config),
         Persistence {
             audit: Some(audit.clone()),
@@ -147,6 +150,7 @@ async fn start(name: &str) -> Daemon {
         peers: Mutex::new(assist_net::Peers::load(&dir).unwrap()),
         pairing: assist_net::Pairing::default(),
         name: "test hub".to_owned(),
+        devices,
     };
     let services = Services {
         facts: Facts::default(),
@@ -298,6 +302,7 @@ async fn notices_reach_only_subscribed_clients() {
         version: "0".to_owned(),
         cwd: None,
         voice: false,
+        contacts: Vec::new(),
     };
     let mut listening = connect(daemon.port, &bearer(&daemon)).await.unwrap();
     let mut other = connect(daemon.port, &bearer(&daemon)).await.unwrap();
@@ -338,6 +343,7 @@ async fn token_client_runs_and_inspects_jobs() {
             version: "0".to_owned(),
             cwd: None,
             voice: false,
+            contacts: Vec::new(),
         },
     )
     .await;
@@ -414,6 +420,7 @@ async fn voice_client_gets_voice_trust() {
         version: "0".to_owned(),
         cwd: None,
         voice: true,
+        contacts: Vec::new(),
     };
     send(&mut ws, Kind::Hello, hello).await;
     recv(&mut ws).await.unwrap();
@@ -779,7 +786,7 @@ fn pair_request(secret: &str) -> Envelope {
     let pair = assist_proto::Pair {
         secret: secret.to_owned(),
         name: "Test phone".to_owned(),
-        capabilities: vec!["send_sms".to_owned()],
+        capabilities: vec!["call".to_owned(), "send_sms".to_owned()],
     };
     Envelope::new(Kind::Pair, "phone", "hub", pair)
 }
@@ -825,4 +832,89 @@ async fn a_device_pairs_once_and_then_talks_as_the_remote_owner() {
     let other = local_endpoint().await;
     let (_, _, again) = device_says(&other, &daemon.hub, pair_request(&ticket.secret)).await;
     assert_eq!(again.kind, Kind::RpcResult);
+}
+
+#[tokio::test]
+async fn a_confirmed_call_runs_on_the_connected_phone() {
+    let daemon = start("route").await;
+    let phone = local_endpoint().await;
+    let mut cli = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    let code: String = call(&mut cli, rpc::PAIR_START, ()).await;
+    let ticket = assist_net::Ticket::parse(&code).unwrap();
+    let (_, _, paired) = device_says(&phone, &daemon.hub, pair_request(&ticket.secret)).await;
+    assert_eq!(paired.kind, Kind::Paired);
+
+    // The phone connects and tells the hub its contact names.
+    let hello = Hello {
+        client: "assist-android".to_owned(),
+        version: "test".to_owned(),
+        cwd: None,
+        voice: false,
+        contacts: vec!["Mom".to_owned()],
+    };
+    let (mut to_hub, mut from_hub, _) = device_says(
+        &phone,
+        &daemon.hub,
+        Envelope::new(Kind::Hello, "phone", "hub", hello),
+    )
+    .await;
+
+    // On the computer: "call mom" is confirmed there, then runs on the phone.
+    let utterance = |text: &str| Utterance {
+        text: text.to_owned(),
+        speaker_verified: false,
+    };
+    send(&mut cli, Kind::Utterance, utterance("call mom")).await;
+    let question: Reply = recv_reply(&mut cli).await;
+    assert_eq!(question.say, ["Call Mom?"], "{question:?}");
+    send(&mut cli, Kind::Utterance, utterance("yes")).await;
+    let started: Reply = recv_reply(&mut cli).await;
+    let job = started.jobs[0].id;
+
+    let frame = tokio::time::timeout(
+        Duration::from_secs(10),
+        assist_net::recv_frame(&mut from_hub),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
+    let request = Envelope::decode(&frame).unwrap();
+    assert_eq!(request.kind, Kind::Run);
+    let run: assist_proto::Run = request.body().unwrap();
+    assert_eq!(run.command, "call");
+    assert_eq!(run.slots.get("contact").map(String::as_str), Some("Mom"));
+    let ran = assist_proto::Ran {
+        job: run.job,
+        lines: vec!["dialing".to_owned()],
+        error: None,
+    };
+    let answer = Envelope::new(Kind::Ran, "phone", "hub", ran);
+    assist_net::send_frame(&mut to_hub, &answer.encode())
+        .await
+        .unwrap();
+
+    let mut output = Vec::new();
+    loop {
+        let message = recv(&mut cli).await.unwrap();
+        match message.body::<JobUpdate>() {
+            Ok(JobUpdate::Output { id, text, .. }) if id == job => output.push(text),
+            Ok(JobUpdate::State { id, state, .. }) if id == job && state.is_finished() => {
+                assert_eq!(state, JobState::Done, "{output:?}");
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(output, ["On Test phone.", "dialing"]);
+}
+
+/// The next reply on a client connection, skipping job updates.
+async fn recv_reply(ws: &mut Ws) -> Reply {
+    loop {
+        let message = recv(ws).await.unwrap();
+        if message.kind == Kind::Reply {
+            return message.body().unwrap();
+        }
+    }
 }

@@ -1,27 +1,45 @@
 //! The phone's link to its computer (PLAN.md section 3.13): pairing with the code from
-//! `assist pair`, then talking to the computer's assistant over iroh as its owner. The
-//! computer checks the phone's key on every connection; the phone checks the computer's.
+//! `assist pair`, then a connection kept open while the app runs. Over it the phone talks to
+//! the computer's assistant as its owner, and runs the phone commands the owner confirmed on
+//! the computer ("text mom" said to the computer). The computer checks the phone's key on
+//! every connection; the phone checks the computer's.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use assist_core::action::BoxFuture;
 use assist_net::{Endpoint, Hub, NetError, Ticket};
-use assist_proto::{Envelope, Hello, JobUpdate, Kind, Pair, Paired, Reply, RpcResult, Utterance};
-use iroh::endpoint::{Connection, SendStream};
+use assist_proto::{
+    Envelope, Hello, JobUpdate, Kind, Pair, Paired, Ran, Reply, RpcResult, Run, Utterance,
+};
+use iroh::endpoint::Connection;
 use tokio::sync::mpsc;
 
 use crate::phone::Phone;
 
 /// How long to wait for the computer to answer.
 const ANSWER_WAIT: Duration = Duration::from_secs(30);
-/// Replies read ahead.
-const REPLIES: usize = 4;
+/// Messages queued each way.
+const QUEUE: usize = 16;
 
 /// Why the link failed, for the user.
 pub(crate) type LinkResult<T> = Result<T, String>;
 
-/// The phone's network endpoint, its computer and an open conversation with it.
+/// Runs a command the computer asks for and reports how it went.
+pub(crate) type Runner = Arc<dyn Fn(Run) -> BoxFuture<Ran> + Send + Sync>;
+
+/// What a connection needs from the phone.
+#[derive(Clone)]
+pub(crate) struct Phoneside {
+    pub(crate) phone: Arc<dyn Phone>,
+    pub(crate) runner: Runner,
+    /// Contact names for the computer, so "text mom" matches there.
+    pub(crate) contacts: Vec<String>,
+}
+
+/// The phone's network endpoint and its open connection to the computer.
 #[derive(Default)]
 pub(crate) struct Link {
     endpoint: Option<Endpoint>,
@@ -29,8 +47,9 @@ pub(crate) struct Link {
 }
 
 struct Session {
-    send: SendStream,
+    outbox: mpsc::Sender<String>,
     replies: mpsc::Receiver<Reply>,
+    alive: Arc<AtomicBool>,
     connection: Connection,
 }
 
@@ -77,34 +96,50 @@ impl Link {
         }
     }
 
+    /// Opens the connection to the paired computer if it is not open.
+    pub(crate) async fn ensure(&mut self, home: &Path, side: &Phoneside) -> LinkResult<()> {
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.alive.load(Ordering::Relaxed))
+        {
+            return Ok(());
+        }
+        let hub = Hub::load(home).ok_or_else(|| "pair with a computer first".to_owned())?;
+        let key = hub.key().map_err(|err| err.to_string())?;
+        let session = self.open(home, key, side.clone()).await?;
+        self.session = Some(session);
+        Ok(())
+    }
+
     /// Sends `text` to the computer's assistant and returns its reply. Output of the jobs it
-    /// starts arrives later through `phone`'s `show`.
+    /// starts arrives later through the phone's `show`.
     pub(crate) async fn say(
         &mut self,
         home: &Path,
         text: &str,
-        phone: &Arc<dyn Phone>,
+        side: &Phoneside,
     ) -> LinkResult<Reply> {
-        let hub = Hub::load(home).ok_or_else(|| "pair with a computer first".to_owned())?;
-        if self.session.is_none() {
-            let key = hub.key().map_err(|err| err.to_string())?;
-            self.session = Some(self.open(home, key, Arc::clone(phone)).await?);
-        }
+        self.ensure(home, side).await?;
         let utterance = Utterance {
             text: text.to_owned(),
             speaker_verified: false,
         };
+        let message = Envelope::new(Kind::Utterance, "phone", "hub", utterance);
         let result = match self.session.as_mut() {
-            Some(session) => session.ask(utterance).await,
+            Some(session) => session.ask(message.encode()).await,
             None => Err("not connected".to_owned()),
         };
         if result.is_err() {
-            // Reconnect next time.
-            if let Some(session) = self.session.take() {
-                session.connection.close(0u32.into(), b"bye");
-            }
+            self.drop_session();
         }
         result
+    }
+
+    fn drop_session(&mut self) {
+        if let Some(session) = self.session.take() {
+            session.connection.close(0u32.into(), b"bye");
+        }
     }
 
     async fn endpoint(&mut self, home: &Path) -> LinkResult<Endpoint> {
@@ -118,12 +153,13 @@ impl Link {
         Ok(endpoint)
     }
 
-    /// Connects, says hello and starts reading what the computer sends.
+    /// Connects, says hello with the contact names, and starts a writer task (which owns
+    /// the stream to the computer) and a reader task (replies, job output, commands to run).
     async fn open(
         &mut self,
         home: &Path,
         hub: assist_net::EndpointId,
-        phone: Arc<dyn Phone>,
+        side: Phoneside,
     ) -> LinkResult<Session> {
         let endpoint = self.endpoint(home).await?;
         let connection = connect(&endpoint, hub).await?;
@@ -133,37 +169,50 @@ impl Link {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             cwd: None,
             voice: false,
+            contacts: side.contacts.clone(),
         };
         let message = Envelope::new(Kind::Hello, "phone", "hub", hello);
         assist_net::send_frame(&mut send, &message.encode())
             .await
             .map_err(|err| err.to_string())?;
-        let (replies, read) = mpsc::channel(REPLIES);
+        let alive = Arc::new(AtomicBool::new(true));
+        let (outbox, mut outgoing) = mpsc::channel::<String>(QUEUE);
+        let writer_alive = Arc::clone(&alive);
+        tokio::spawn(async move {
+            while let Some(text) = outgoing.recv().await {
+                if assist_net::send_frame(&mut send, &text).await.is_err() {
+                    break;
+                }
+            }
+            writer_alive.store(false, Ordering::Relaxed);
+        });
+        let (replies, read) = mpsc::channel(QUEUE);
+        let reader_alive = Arc::clone(&alive);
+        let answers = outbox.clone();
         tokio::spawn(async move {
             while let Ok(Some(text)) = assist_net::recv_frame(&mut recv).await {
                 let Ok(message) = Envelope::decode(&text) else {
                     continue;
                 };
-                if let Some(line) = route(&message, &replies).await {
-                    let phone = Arc::clone(&phone);
-                    drop(tokio::task::spawn_blocking(move || phone.show(line)));
-                }
+                handle(message, &replies, &answers, &side).await;
             }
+            reader_alive.store(false, Ordering::Relaxed);
         });
         Ok(Session {
-            send,
+            outbox,
             replies: read,
+            alive,
             connection,
         })
     }
 }
 
 impl Session {
-    async fn ask(&mut self, utterance: Utterance) -> LinkResult<Reply> {
-        let message = Envelope::new(Kind::Utterance, "phone", "hub", utterance);
-        assist_net::send_frame(&mut self.send, &message.encode())
+    async fn ask(&mut self, message: String) -> LinkResult<Reply> {
+        self.outbox
+            .send(message)
             .await
-            .map_err(|err| err.to_string())?;
+            .map_err(|_| "the computer closed the connection".to_owned())?;
         tokio::time::timeout(ANSWER_WAIT, self.replies.recv())
             .await
             .map_err(|_| "the computer did not answer".to_owned())?
@@ -171,20 +220,44 @@ impl Session {
     }
 }
 
-/// Hands a reply to the waiting `say`; returns a line to show for job output and failures.
-async fn route(message: &Envelope, replies: &mpsc::Sender<Reply>) -> Option<String> {
+/// One message from the computer: a reply for the waiting `say`, a line of job output or a
+/// failure for the chat, or a command to run here.
+async fn handle(
+    message: Envelope,
+    replies: &mpsc::Sender<Reply>,
+    answers: &mpsc::Sender<String>,
+    side: &Phoneside,
+) {
+    let show = |line: String| {
+        let phone = Arc::clone(&side.phone);
+        drop(tokio::task::spawn_blocking(move || phone.show(line)));
+    };
     match message.kind {
         Kind::Reply => {
             if let Ok(reply) = message.body::<Reply>() {
                 let _ = replies.send(reply).await;
             }
-            None
         }
-        Kind::JobUpdate => match message.body::<JobUpdate>().ok()? {
-            JobUpdate::Output { text, .. } => Some(text),
-            JobUpdate::State { error, .. } => error,
+        Kind::JobUpdate => match message.body::<JobUpdate>() {
+            Ok(JobUpdate::Output { text, .. }) => show(text),
+            Ok(JobUpdate::State {
+                error: Some(error), ..
+            }) => show(error),
+            _ => {}
         },
-        _ => None,
+        Kind::Run => {
+            if let Ok(run) = message.body::<Run>() {
+                // Commands can take a while (a call, a recording); the reader keeps reading.
+                let runner = Arc::clone(&side.runner);
+                let answers = answers.clone();
+                tokio::spawn(async move {
+                    let ran = runner(run).await;
+                    let answer = Envelope::new(Kind::Ran, "phone", "hub", ran);
+                    let _ = answers.send(answer.encode()).await;
+                });
+            }
+        }
+        _ => {}
     }
 }
 

@@ -8,6 +8,7 @@ use std::path::Path;
 use iroh::endpoint::{presets, RecvStream, SendStream};
 pub use iroh::{Endpoint, EndpointId, SecretKey};
 
+pub mod commands;
 mod pairing;
 mod peers;
 

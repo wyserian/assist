@@ -127,6 +127,8 @@ pub struct Assistant {
     pub engine: Arc<LiveEngine>,
     /// Cancelled by "shut down"; the daemon and the shell stop when it is.
     pub stop: CancellationToken,
+    /// Paired devices connected to the daemon, which run the phone commands.
+    pub devices: Arc<assist_server::Devices>,
 }
 
 impl Assistant {
@@ -155,6 +157,11 @@ impl Assistant {
         let stop = CancellationToken::new();
         let mut actions = assist_actions::builtin();
         actions.push(Arc::new(crate::shutdown::Shutdown { stop: stop.clone() }));
+        // Phone commands this computer lacks (call, text, ...) run on a paired phone.
+        let devices = Arc::new(assist_server::Devices::default());
+        let local: Vec<&str> = actions.iter().map(|a| a.manifest().name).collect();
+        let remote = assist_server::proxies(&devices, &local);
+        actions.extend(remote);
         let host = Host {
             actions,
             phrases: PhraseSet::load_dir(&paths.phrases_dir())?,
@@ -186,6 +193,7 @@ impl Assistant {
             scheduler,
             engine,
             stop,
+            devices,
         })
     }
 

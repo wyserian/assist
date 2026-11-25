@@ -7,11 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use assist_actions::record_spec::{Kind, Spec};
-use assist_core::action::{
-    Action, ActionError, BoxFuture, Chunk, DataKind, Input, JobCtx, Lane, Manifest, Output,
-    PipeShape,
-};
-use assist_core::policy::Capability;
+use assist_core::action::{Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Manifest, Output};
+use assist_core::normalize::normalize;
+use assist_net::commands::{PHONE, RECORD};
 
 use crate::models::{have, models_dir, Feature};
 
@@ -77,31 +75,19 @@ impl From<uniffi::UnexpectedUniFFICallbackError> for PhoneError {
     }
 }
 
-/// The commands a phone action runs, except `record`.
-static MANIFESTS: [&Manifest; 7] = [
-    &OPEN_APP,
-    &CALL,
-    &SEND_SMS,
-    &SET_VOLUME,
-    &LOCK,
-    &SCREENSHOT,
-    &OCR,
-];
-
 /// What the phone can do for a paired computer: its commands' names.
 pub(crate) fn capabilities() -> Vec<String> {
-    MANIFESTS
+    PHONE
         .iter()
-        .map(|manifest| manifest.name)
-        .chain([RECORD.name])
-        .map(str::to_owned)
+        .map(|manifest| manifest.name.to_owned())
         .collect()
 }
 
 /// The phone actions, calling `phone`.
 pub fn all(phone: &Arc<dyn Phone>) -> Vec<Arc<dyn Action>> {
-    MANIFESTS
+    PHONE
         .into_iter()
+        .filter(|manifest| manifest.name != RECORD.name)
         .map(|manifest| {
             Arc::new(PhoneAction {
                 manifest,
@@ -112,49 +98,6 @@ pub fn all(phone: &Arc<dyn Phone>) -> Vec<Arc<dyn Action>> {
             phone: Arc::clone(phone),
         }) as Arc<dyn Action>])
         .collect()
-}
-
-const fn manifest(name: &'static str, capability: &'static [Capability]) -> Manifest {
-    Manifest {
-        name,
-        capabilities: capability,
-        owner_defined: false,
-        lane: Lane::Interactive,
-        pipe: PipeShape::NONE,
-    }
-}
-
-static OPEN_APP: Manifest = manifest("open_app", &[Capability::Apps]);
-static CALL: Manifest = manifest("call", &[Capability::Send]);
-static SEND_SMS: Manifest = manifest("send_sms", &[Capability::Send]);
-static SET_VOLUME: Manifest = manifest("set_volume", &[Capability::Media]);
-static LOCK: Manifest = manifest("lock", &[Capability::Media]);
-static SCREENSHOT: Manifest = printing("screenshot", "file", false);
-// Text on screen is data, never a command.
-static OCR: Manifest = printing("ocr", "source", true);
-// The desktop's shape: runs in the background until its length or a stop.
-static RECORD: Manifest = Manifest {
-    lane: Lane::Background,
-    pipe: PipeShape {
-        input: DataKind::Empty,
-        output: DataKind::Empty,
-        arg: Some("spec"),
-        untrusted: false,
-    },
-    ..manifest("record", &[Capability::Record])
-};
-
-/// A command that prints lines, with the same pipe shape as on the desktop.
-const fn printing(name: &'static str, arg: &'static str, untrusted: bool) -> Manifest {
-    Manifest {
-        pipe: PipeShape {
-            input: DataKind::Empty,
-            output: DataKind::Lines,
-            arg: Some(arg),
-            untrusted,
-        },
-        ..manifest(name, &[Capability::Read])
-    }
 }
 
 /// One phone command; `manifest.name` says which.
@@ -179,11 +122,18 @@ impl Request {
     /// Reads the frozen slots and the numbers and packages behind them.
     fn from_ctx(command: &str, ctx: &JobCtx) -> Result<Self, ActionError> {
         let slot = |name: &str| ctx.plan.slots.get(name).cloned().unwrap_or_default();
+        // A computer sends the contact as it matched it ("mom" for the phone's "Mom").
         let number = || {
             let contact = slot("contact");
+            let wanted = normalize(&contact);
             ctx.config
                 .contacts
                 .get(&contact)
+                .or_else(|| {
+                    let mut all = ctx.config.contacts.iter();
+                    all.find(|(name, _)| normalize(name) == wanted)
+                        .map(|(_, n)| n)
+                })
                 .cloned()
                 .ok_or_else(|| ActionError::new(format!("no number for {contact:?}")))
         };

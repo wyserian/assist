@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use assist_core::assistant::{assemble, Host};
 use assist_core::config::{Config, Sink};
-use assist_core::dialog::{Dialog, LiveEngine};
+use assist_core::dialog::{Dialog, LiveEngine, Plan};
 use assist_core::facts::{Facts, Value};
 use assist_core::policy::Principal;
 use assist_core::proactive;
@@ -117,8 +117,9 @@ pub struct Assistant {
     wake_phrases: Vec<String>,
     awake_seconds: u32,
     woke: String,
-    phone: Arc<dyn Phone>,
-    /// The paired computer and the conversation with it.
+    /// What the link to the computer needs from this phone.
+    side: link::Phoneside,
+    /// The paired computer and the connection to it.
     link: tokio::sync::Mutex<link::Link>,
 }
 
@@ -157,6 +158,7 @@ impl Assistant {
             .build()
             .map_err(|e| failed(&e))?;
         let mut config = Config::from_toml(&config_toml).map_err(|e| failed(&e))?;
+        let names = contacts.iter().map(|c| c.name.clone()).collect();
         add_phone_lists(&mut config, contacts, apps);
         let wake_phrases = config.persona.wake_phrases();
         let awake_seconds = u32::try_from(config.voice.awake.as_secs()).unwrap_or(u32::MAX);
@@ -192,6 +194,11 @@ impl Assistant {
             );
             parts
         };
+        let side = link::Phoneside {
+            runner: runner(&parts.scheduler, &parts.engine, &home, &caller),
+            phone: caller,
+            contacts: names,
+        };
         Ok(Arc::new(Self {
             typed: Conversation::new(&parts.engine, Principal::local("android")),
             spoken: Conversation::new(&parts.engine, Principal::voice("android")),
@@ -204,7 +211,7 @@ impl Assistant {
             wake_phrases,
             awake_seconds,
             woke,
-            phone: caller,
+            side,
             link: tokio::sync::Mutex::default(),
         }))
     }
@@ -258,6 +265,14 @@ impl Assistant {
         link::paired(&self.home)
     }
 
+    /// Connects to the paired computer if not connected, so it can run phone commands here
+    /// ("text mom" said to the computer). The app calls it now and then while it runs.
+    pub fn connect_computer(&self) -> Result<(), AssistError> {
+        self.runtime
+            .block_on(async { self.link.lock().await.ensure(&self.home, &self.side).await })
+            .map_err(AssistError::Link)
+    }
+
     /// Says `text` to the paired computer's assistant, as its owner; its jobs' output comes
     /// later through the phone's `show`.
     pub fn say_remote(&self, text: String) -> Result<Answer, AssistError> {
@@ -267,7 +282,7 @@ impl Assistant {
                 self.link
                     .lock()
                     .await
-                    .say(&self.home, &text, &self.phone)
+                    .say(&self.home, &text, &self.side)
                     .await
             })
             .map_err(AssistError::Link)?;
@@ -352,6 +367,57 @@ pub struct JobOutput {
     /// It finished or is no longer kept: no more lines will come.
     pub ended: bool,
 }
+
+/// Runs the phone commands the computer asks for, after the owner confirmed them there: only
+/// this phone's own commands, shown in the chat as they start.
+fn runner(
+    scheduler: &Scheduler,
+    engine: &Arc<LiveEngine>,
+    home: &std::path::Path,
+    phone: &Arc<dyn Phone>,
+) -> link::Runner {
+    let (scheduler, engine) = (scheduler.clone(), Arc::clone(engine));
+    let (home, phone) = (home.to_owned(), Arc::clone(phone));
+    Arc::new(move |run: assist_proto::Run| {
+        let (scheduler, engine) = (scheduler.clone(), Arc::clone(&engine));
+        let (home, phone) = (home.clone(), Arc::clone(&phone));
+        Box::pin(async move {
+            let job = run.job;
+            let ran = |lines, error| assist_proto::Ran { job, lines, error };
+            if assist_net::commands::phone(&run.command).is_none() {
+                return ran(
+                    Vec::new(),
+                    Some(format!("this phone does not run {}", run.command)),
+                );
+            }
+            let plan = Plan {
+                command: run.command,
+                slots: run.slots,
+                typed: false,
+            };
+            let title = engine.get().readback(&plan);
+            let line = format!("The computer asked: {title}");
+            drop(tokio::task::spawn_blocking(move || phone.show(line)));
+            let id = match scheduler.submit(plan, Principal::remote("computer"), title, home) {
+                Ok(id) => id,
+                Err(err) => return ran(Vec::new(), Some(err.to_string())),
+            };
+            loop {
+                match scheduler.get(id) {
+                    Some(info) if info.state.is_finished() => {
+                        let lines = scheduler.tail(id).unwrap_or_default();
+                        return ran(lines, info.error.map(|err| err.message));
+                    }
+                    Some(_) => tokio::time::sleep(RUN_POLL).await,
+                    None => return ran(Vec::new(), Some("the job is gone".to_owned())),
+                }
+            }
+        })
+    })
+}
+
+/// How often a command run for the computer is checked.
+const RUN_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Adds the phone's contacts and apps to the `[contacts]` and `[apps]` lists the matcher
 /// uses; config.toml entries win (`Config::add_found_apps`).
@@ -605,6 +671,36 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         assert_eq!(*phone.0.lock().unwrap(), ["notice true Battery is low."]);
+        finish(assistant, dir);
+    }
+
+    #[test]
+    fn runs_only_phone_commands_for_the_computer() {
+        let phone = Arc::new(FakePhone::default());
+        let (assistant, dir) = start("runner", Arc::clone(&phone));
+        let run = |command: &str, slots: &[(&str, &str)]| assist_proto::Run {
+            job: 7,
+            command: command.to_owned(),
+            slots: slots
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        };
+        let runner = Arc::clone(&assistant.side.runner);
+        let refused = assistant.runtime.block_on(runner(run("shell", &[])));
+        assert!(refused.error.unwrap().contains("does not run"));
+        // The computer matched "mom"; the phone's contact is "Mom".
+        let called = assistant
+            .runtime
+            .block_on(runner(run("call", &[("contact", "mom")])));
+        assert_eq!((called.job, called.error), (7, None));
+        let log = phone.0.lock().unwrap().clone();
+        assert!(log.iter().any(|l| l == "call 555 0100"), "{log:?}");
+        assert!(
+            log.iter()
+                .any(|l| l.starts_with("show The computer asked: call")),
+            "{log:?}"
+        );
         finish(assistant, dir);
     }
 

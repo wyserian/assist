@@ -19,6 +19,10 @@ pub struct Hello {
     /// (anyone in the room). A client can only lower its trust this way, never raise it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub voice: bool,
+    /// A paired phone's contact names, so the hub understands "text mom"; the numbers stay
+    /// on the phone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<String>,
 }
 
 /// [`crate::Kind::Pair`]: a new device asks to be paired. Sent over an authenticated
@@ -39,6 +43,31 @@ pub struct Pair {
 pub struct Paired {
     /// The hub's name, e.g. its computer name.
     pub name: String,
+}
+
+/// [`crate::Kind::Run`]: run this confirmed command on the device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Run {
+    /// The hub's number for this request, echoed in [`Ran`].
+    pub job: u64,
+    /// The command, e.g. `send_sms`.
+    pub command: String,
+    /// Its resolved slots.
+    #[serde(default)]
+    pub slots: std::collections::BTreeMap<String, String>,
+}
+
+/// [`crate::Kind::Ran`]: how a [`Run`] went.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ran {
+    /// The [`Run`]'s number.
+    pub job: u64,
+    /// What it printed.
+    #[serde(default)]
+    pub lines: Vec<String>,
+    /// Why it failed; `None` when it worked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// [`crate::Kind::Utterance`]: text from the user.

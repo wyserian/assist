@@ -17,8 +17,8 @@ mod job;
 pub mod rpc;
 
 pub use body::{
-    Hello, JobBrief, JobSummary, JobUpdate, Notice, Pair, Paired, Reply, Rpc, RpcError, RpcResult,
-    Stream, Subscribe, Utterance,
+    Hello, JobBrief, JobSummary, JobUpdate, Notice, Pair, Paired, Ran, Reply, Rpc, RpcError,
+    RpcResult, Run, Stream, Subscribe, Utterance,
 };
 pub use job::{JobState, Lane};
 
@@ -53,6 +53,10 @@ pub enum Kind {
     Pair,
     /// The hub accepted a [`Kind::Pair`].
     Paired,
+    /// The hub asks a paired device to run a command the owner confirmed on the hub.
+    Run,
+    /// A device's result of a [`Kind::Run`].
+    Ran,
     /// A kind this build does not know; ignored.
     #[serde(other)]
     Unknown,
