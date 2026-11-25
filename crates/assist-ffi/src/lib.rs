@@ -4,6 +4,7 @@
 //! actions call back into the app through [`phone::Phone`].
 
 pub mod phone;
+pub mod voice;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -45,13 +46,16 @@ pub struct App {
     pub package_name: String,
 }
 
-/// Why the assistant could not start.
+/// Why the assistant or its voice could not start.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum AssistError {
     /// The config, data directory or engine failed.
     #[error("{0}")]
     Start(String),
+    /// A voice model is missing, broken or failed its checksum.
+    #[error("{0}")]
+    Voice(String),
 }
 
 /// What the assistant answers.

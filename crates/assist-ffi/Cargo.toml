@@ -22,11 +22,15 @@ bindgen = ["uniffi/cli"]
 
 [dependencies]
 assist-core.workspace = true
+assist-voice.workspace = true
 assist-actions = { workspace = true, features = ["transforms", "memory", "mute"] }
 thiserror.workspace = true
 toml.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 uniffi.workspace = true
+
+[dev-dependencies]
+sherpa-onnx.workspace = true
 
 [lints]
 workspace = true

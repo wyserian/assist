@@ -22,7 +22,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -94,7 +97,20 @@ private fun Chat(model: ChatViewModel) {
                 keyboardActions = KeyboardActions(onSend = { send() }),
             )
             Button(onClick = send, modifier = Modifier.padding(start = 8.dp)) { Text("Send") }
+            FilledTonalButton(onClick = model::talk, modifier = Modifier.padding(start = 8.dp)) {
+                Text(if (model.listening) "Stop" else "Talk")
+            }
         }
+    }
+    if (model.offer.isNotEmpty()) {
+        val files = model.offer.joinToString("\n") { "${it.name}: ${it.sizeMb} MB, licence ${it.licence}" }
+        AlertDialog(
+            onDismissRequest = { model.answerOffer(false) },
+            title = { Text("Download voice models?") },
+            text = { Text("Speech is recognized on this phone. It needs, from the sherpa-onnx releases on GitHub:\n\n$files") },
+            confirmButton = { TextButton(onClick = { model.answerOffer(true) }) { Text("Download") } },
+            dismissButton = { TextButton(onClick = { model.answerOffer(false) }) { Text("Not now") } },
+        )
     }
 }
 
