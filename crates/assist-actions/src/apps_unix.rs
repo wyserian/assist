@@ -9,6 +9,20 @@ pub(super) fn installed() -> Vec<(String, String)> {
     Vec::new()
 }
 
+/// shortcut: always launches on Linux; find the window through X11 or Wayland when a Linux
+/// desktop wants "open" to switch to it.
+pub(super) fn bring_to_front(_name: &str, _hint: &str) -> std::io::Result<bool> {
+    Ok(false)
+}
+
+/// shortcut: closing apps is Windows only; send SIGTERM to the app's processes when a Linux
+/// desktop wants it.
+pub(super) fn close(name: &str, _hint: &str) -> std::io::Result<usize> {
+    Err(std::io::Error::other(format!(
+        "closing {name} is not supported on Linux yet"
+    )))
+}
+
 pub(super) fn launch(program: &str) -> std::io::Result<()> {
     let mut child = Command::new(program)
         .stdin(Stdio::null())

@@ -16,23 +16,58 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Most output read from the helper; a Start menu list is far smaller.
 const MAX_OUTPUT: usize = 4 << 20;
 
+/// Runs a PowerShell `script` with `env` set and returns what it printed. Values reach the
+/// script as environment variables, never as script text.
+fn powershell(script: &str, env: &[(&str, &str)]) -> std::io::Result<String> {
+    let out = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .envs(env.iter().copied())
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()?;
+    if !out.status.success() || out.stdout.len() > MAX_OUTPUT {
+        return Err(std::io::Error::other("PowerShell failed"));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 /// The Start menu's apps, desktop and Store alike, as Windows lists them (`Get-StartApps`):
 /// name and `shell:AppsFolder\<id>`, which opens them. Empty if PowerShell fails. Blocking.
 pub(super) fn installed() -> Vec<(String, String)> {
     let script = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; \
                   ConvertTo-Json -Compress -InputObject @(Get-StartApps | Select-Object Name, AppID)";
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    match output {
-        Ok(out) if out.status.success() && out.stdout.len() <= MAX_OUTPUT => {
-            parse(&String::from_utf8_lossy(&out.stdout))
-        }
-        _ => Vec::new(),
-    }
+    powershell(script, &[]).map_or_else(|_| Vec::new(), |json| parse(&json))
+}
+
+/// Finds the running app's windows: its process name (`hint`, from how it is launched) or its
+/// name as the process, the program's description ("Google Chrome") or the window title
+/// ("Calculator", "notes.txt - Notepad"). Only processes with a window count.
+const FIND: &str = "$name = $env:ASSIST_APP.ToLower(); $hint = $env:ASSIST_HINT.ToLower()
+$found = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Where-Object {
+  $p = $_.ProcessName.ToLower(); $t = $_.MainWindowTitle.ToLower(); $d = ''
+  try { $d = [string]$_.MainModule.FileVersionInfo.FileDescription } catch {}
+  ($hint -and $p -eq $hint) -or $p -eq $name -or $d.ToLower() -eq $name -or $t -eq $name -or $t.EndsWith(' - ' + $name)
+})
+";
+
+/// Brings the app's window to the front; false if none is open.
+pub(super) fn bring_to_front(name: &str, hint: &str) -> std::io::Result<bool> {
+    let script = format!(
+        "{FIND}$shell = New-Object -ComObject WScript.Shell; $done = 0
+foreach ($p in $found) {{ if ($shell.AppActivate($p.Id)) {{ $done = 1; break }} }}; $done"
+    );
+    let out = powershell(&script, &[("ASSIST_APP", name), ("ASSIST_HINT", hint)])?;
+    Ok(out.trim() == "1")
+}
+
+/// Asks the app's windows to close (as their close button does); returns how many agreed.
+pub(super) fn close(name: &str, hint: &str) -> std::io::Result<usize> {
+    let script = format!(
+        "{FIND}$done = 0; foreach ($p in $found) {{ if ($p.CloseMainWindow()) {{ $done++ }} }}; $done"
+    );
+    let out = powershell(&script, &[("ASSIST_APP", name), ("ASSIST_HINT", hint)])?;
+    Ok(out.trim().parse().unwrap_or(0))
 }
 
 #[derive(Deserialize)]

@@ -50,7 +50,7 @@ pub fn builtin() -> Vec<Arc<dyn Action>> {
     #[cfg(feature = "scripts")]
     actions.push(Arc::new(scripts::RunScript));
     #[cfg(feature = "apps")]
-    actions.push(Arc::new(apps::OpenApp));
+    actions.extend(apps::all());
     #[cfg(feature = "search")]
     actions.push(Arc::new(search::Search));
     #[cfg(feature = "transforms")]
