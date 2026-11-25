@@ -3,7 +3,7 @@
 //! Only the sections the current phase uses are accepted; unknown keys are errors so typos
 //! (`[contcts]`) never pass silently.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,6 +13,7 @@ use serde::{Deserialize, Deserializer};
 
 use crate::condition::Condition;
 use crate::dialog::SHELL;
+use crate::normalize::normalize;
 use crate::phrases::PhraseSet;
 use crate::policy::PolicyOverrides;
 use crate::replies::Line;
@@ -663,6 +664,19 @@ impl Config {
         Ok(())
     }
 
+    /// Adds apps this device found (name, how to launch it) to `[apps]`. Entries from
+    /// config.toml win, also over a found name that differs only in case or spacing; see
+    /// [`add_found`].
+    pub fn add_found_apps(&mut self, apps: impl IntoIterator<Item = (String, String)>) {
+        add_found(&mut self.apps, apps, toml::Value::String);
+    }
+
+    /// Adds contacts this device found (name, number) to `[contacts]`, like
+    /// [`Config::add_found_apps`].
+    pub fn add_found_contacts(&mut self, contacts: impl IntoIterator<Item = (String, String)>) {
+        add_found(&mut self.contacts, contacts, |number| number);
+    }
+
     /// Value lists that `list:<name>` slots match against: `apps`, `contacts`, `scripts`,
     /// `pipes`.
     pub fn lists(&self) -> BTreeMap<String, Vec<String>> {
@@ -683,6 +697,30 @@ impl Config {
                     .collect(),
             ),
         ])
+    }
+}
+
+/// Most entries a device may add to one list, and the longest name kept.
+const MAX_FOUND: usize = 5000;
+const MAX_FOUND_NAME: usize = 100;
+
+/// Adds found entries to `list`: names trimmed and bounded, at most [`MAX_FOUND`] taken, and
+/// a name that matches one already there (as the matcher compares them) is skipped, so the
+/// owner's entry wins and two found spellings of one app do not make "open firefox" ask which.
+fn add_found<V>(
+    list: &mut BTreeMap<String, V>,
+    found: impl IntoIterator<Item = (String, String)>,
+    value: impl Fn(String) -> V,
+) {
+    let mut taken: BTreeSet<String> = list.keys().map(|k| normalize(k)).collect();
+    for (name, launch) in found.into_iter().take(MAX_FOUND) {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > MAX_FOUND_NAME {
+            continue;
+        }
+        if taken.insert(normalize(name)) {
+            list.insert(name.to_owned(), value(launch));
+        }
     }
 }
 
@@ -781,6 +819,23 @@ pub(crate) fn location(src: &str, err: &toml::de::Error) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn found_apps_never_shadow_config_entries_or_each_other() {
+        let mut config = Config::from_toml("[apps]\nfirefox = \"firefox.exe\"\n").unwrap();
+        let long = "x".repeat(MAX_FOUND_NAME + 1);
+        config.add_found_apps([
+            ("Firefox".to_owned(), "shell:AppsFolder\\Firefox".to_owned()),
+            (" Google Chrome ".to_owned(), "chrome-id".to_owned()),
+            ("google  chrome".to_owned(), "other-id".to_owned()),
+            ("  ".to_owned(), "x".to_owned()),
+            (long, "x".to_owned()),
+        ]);
+        let names: Vec<_> = config.apps.keys().map(String::as_str).collect();
+        assert_eq!(names, ["Google Chrome", "firefox"]);
+        assert_eq!(config.apps["firefox"].as_str(), Some("firefox.exe"));
+        assert_eq!(config.apps["Google Chrome"].as_str(), Some("chrome-id"));
+    }
 
     #[test]
     fn wake_phrases_follow_the_name_unless_set() {

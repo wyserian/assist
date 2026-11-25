@@ -47,10 +47,6 @@ pub enum FactValue {
     },
 }
 
-/// Most contacts and apps taken from the phone, and the longest name kept.
-const MAX_ENTRIES: usize = 5000;
-const MAX_NAME: usize = 100;
-
 /// A contact from the phone's address book.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Contact {
@@ -300,25 +296,10 @@ pub struct JobOutput {
 }
 
 /// Adds the phone's contacts and apps to the `[contacts]` and `[apps]` lists the matcher
-/// uses. Entries in config.toml win; names are trimmed and bounded, numbers taken as given.
+/// uses; config.toml entries win (`Config::add_found_apps`).
 fn add_phone_lists(config: &mut Config, contacts: Vec<Contact>, apps: Vec<App>) {
-    let name = |raw: &str| {
-        let name = raw.trim();
-        (!name.is_empty() && name.chars().count() <= MAX_NAME).then(|| name.to_owned())
-    };
-    for contact in contacts.into_iter().take(MAX_ENTRIES) {
-        if let Some(key) = name(&contact.name) {
-            config.contacts.entry(key).or_insert(contact.number);
-        }
-    }
-    for app in apps.into_iter().take(MAX_ENTRIES) {
-        if let Some(key) = name(&app.name) {
-            config
-                .apps
-                .entry(key)
-                .or_insert(toml::Value::String(app.package_name));
-        }
-    }
+    config.add_found_contacts(contacts.into_iter().map(|c| (c.name, c.number)));
+    config.add_found_apps(apps.into_iter().map(|a| (a.name, a.package_name)));
 }
 
 impl Drop for Assistant {
@@ -578,7 +559,7 @@ mom = \"1\"
             name: name.to_owned(),
             number: "2".to_owned(),
         };
-        let long = "x".repeat(MAX_NAME + 1);
+        let long = "x".repeat(101);
         add_phone_lists(
             &mut config,
             vec![

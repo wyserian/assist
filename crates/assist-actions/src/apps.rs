@@ -1,7 +1,8 @@
 //! "open firefox": launches an app from `[apps]`, detached from the job.
 //!
 //! An app is a program name or path, or a table with one per OS:
-//! `firefox = { windows = "firefox.exe", linux = "firefox" }`.
+//! `firefox = { windows = "firefox.exe", linux = "firefox" }`. [`installed`] finds the apps
+//! this device has, which join `[apps]` at start (config.toml entries win).
 
 use assist_core::action::{
     Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Lane, Manifest, Output, PipeShape,
@@ -14,6 +15,12 @@ mod os;
 #[cfg(windows)]
 #[path = "apps_windows.rs"]
 mod os;
+
+/// The apps installed on this device, as (name, how to launch it). Blocking: it asks the
+/// OS, which takes about a second on Windows.
+pub fn installed() -> Vec<(String, String)> {
+    os::installed()
+}
 
 /// Opens configured apps.
 pub struct OpenApp;

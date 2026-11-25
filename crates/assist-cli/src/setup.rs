@@ -65,6 +65,9 @@ impl Paths {
     }
 }
 
+/// How long to wait for the OS to list installed apps before starting without them.
+const FIND_APPS: Duration = Duration::from_secs(10);
+
 /// How often device facts are read.
 const FACT_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -124,9 +127,20 @@ pub struct Assistant {
 }
 
 impl Assistant {
-    /// Loads config and opens the data directory. Prints what it cleaned up from the last run.
-    pub fn start(paths: &Paths) -> Result<Self> {
-        let config = Arc::new(load_config(paths)?);
+    /// Loads config, adds the apps installed here and opens the data directory. Prints what
+    /// it cleaned up from the last run.
+    pub async fn start(paths: &Paths) -> Result<Self> {
+        let mut config = load_config(paths)?;
+        let found = tokio::time::timeout(
+            FIND_APPS,
+            tokio::task::spawn_blocking(assist_actions::apps::installed),
+        )
+        .await;
+        match found {
+            Ok(Ok(apps)) => config.add_found_apps(apps),
+            _ => println!("Installed apps not found; only [apps] from the config can be opened."),
+        }
+        let config = Arc::new(config);
         // Without a keystore the assistant still runs; secrets and redaction are off.
         let secrets = OsKeystore::open()
             .and_then(|keystore| Secrets::open(Box::new(keystore), &paths.data))

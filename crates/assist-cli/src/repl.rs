@@ -51,7 +51,7 @@ enum Flow {
 
 /// Runs the shell until input ends, `exit` or Ctrl+C.
 pub async fn run(paths: Paths) -> Result<()> {
-    let assistant = Assistant::start(&paths)?;
+    let assistant = Assistant::start(&paths).await?;
     let owner = Principal::local("cli");
     let mut repl = Repl {
         dialog: Dialog::new(assistant.engine.get(), owner.clone()),

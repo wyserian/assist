@@ -3,6 +3,12 @@
 
 use std::process::{Command, Stdio};
 
+/// shortcut: nothing is found on Linux; read `.desktop` files (their launch lines take
+/// arguments, which `launch` does not) when a Linux desktop wants found apps.
+pub(super) fn installed() -> Vec<(String, String)> {
+    Vec::new()
+}
+
 pub(super) fn launch(program: &str) -> std::io::Result<()> {
     let mut child = Command::new(program)
         .stdin(Stdio::null())

@@ -23,7 +23,7 @@ const STOP_WAIT: Duration = Duration::from_secs(10);
 
 /// Serves until Ctrl+C, then stops every job and saves history.
 pub async fn run(paths: Paths) -> Result<()> {
-    let assistant = Assistant::start(&paths)?;
+    let assistant = Assistant::start(&paths).await?;
     let bind = assistant.config.server.bind;
     let listener = TcpListener::bind(bind)
         .await
