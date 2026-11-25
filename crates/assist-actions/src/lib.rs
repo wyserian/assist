@@ -23,6 +23,7 @@ mod process;
 pub mod processes;
 #[cfg(feature = "record")]
 pub mod record;
+pub mod record_spec;
 #[cfg(feature = "rename")]
 pub mod rename;
 #[cfg(all(feature = "screen", windows))]

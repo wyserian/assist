@@ -4,7 +4,7 @@
 //! shortcut: X11 only; a Wayland session needs the screencast portal, added with Linux
 //! screenshots.
 
-use super::Kind;
+use crate::record_spec::Kind;
 
 /// The input arguments for `kind`.
 pub async fn input(kind: Kind) -> Result<Vec<String>, String> {

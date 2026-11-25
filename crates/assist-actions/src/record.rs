@@ -8,17 +8,16 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use assist_core::action::{
     Action, ActionError, BoxFuture, Chunk, DataKind, Input, JobCtx, Lane, Manifest, Output,
     PipeShape,
 };
-use assist_core::config::parse_duration;
 use assist_core::policy::Capability;
 use tokio::process::Command;
 
 use crate::process;
+use crate::record_spec::{Kind, Spec};
 
 #[cfg(unix)]
 #[path = "record_unix.rs"]
@@ -26,9 +25,6 @@ mod os;
 #[cfg(windows)]
 #[path = "record_windows.rs"]
 mod os;
-
-/// Longest recording `for` accepts.
-const MAX_FOR: Duration = Duration::from_secs(4 * 3600);
 
 /// `record`.
 pub fn all() -> Vec<Arc<dyn Action>> {
@@ -50,20 +46,6 @@ static RECORD: Manifest = Manifest {
         untrusted: false,
     },
 };
-
-/// What to record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kind {
-    Screen,
-    Audio,
-}
-
-#[derive(Debug, PartialEq)]
-struct Spec {
-    kind: Kind,
-    length: Option<Duration>,
-    file: Option<String>,
-}
 
 impl Action for Record {
     fn manifest(&self) -> &Manifest {
@@ -140,75 +122,4 @@ fn default_path(kind: Kind, job: u64) -> Result<PathBuf, ActionError> {
     let dir: &Path =
         dir.ok_or_else(|| ActionError::new("no Videos or Music folder; give a file name"))?;
     Ok(dir.join(format!("assist-{job}.{ext}")))
-}
-
-impl Spec {
-    /// `screen|audio [for <length>] [to <file>]`; the file keeps its spelling.
-    fn parse(text: &str) -> Result<Self, String> {
-        let usage = || "use: record screen|audio [for 30s] [to file]".to_owned();
-        let (head, file) = match text.split_once(" to ") {
-            Some((head, file)) if !file.trim().is_empty() => (head, Some(file.trim().to_owned())),
-            _ => (text, None),
-        };
-        let words: Vec<String> = head.split_whitespace().map(str::to_lowercase).collect();
-        let kind = words
-            .iter()
-            .find_map(|w| match w.as_str() {
-                "screen" | "desktop" => Some(Kind::Screen),
-                "audio" | "mic" | "microphone" | "sound" | "voice" => Some(Kind::Audio),
-                _ => None,
-            })
-            .ok_or_else(usage)?;
-        let length = match words.iter().position(|w| w == "for") {
-            Some(at) => Some(length(&words[at + 1..]).ok_or_else(usage)?),
-            None => None,
-        };
-        if length.is_some_and(|l| l.is_zero() || l > MAX_FOR) {
-            return Err("record for at most 4h".to_owned());
-        }
-        Ok(Self { kind, length, file })
-    }
-}
-
-/// `30s`, `30 seconds`, `2 min`, `1 hour`.
-fn length(words: &[String]) -> Option<Duration> {
-    let joined = words.join(" ");
-    if let Some(d) = parse_duration(&joined) {
-        return Some(d);
-    }
-    let (n, unit) = (words.first()?, words.get(1)?);
-    let unit = match unit.as_str() {
-        "s" | "sec" | "secs" | "second" | "seconds" => "s",
-        "m" | "min" | "mins" | "minute" | "minutes" => "m",
-        "h" | "hour" | "hours" => "h",
-        _ => return None,
-    };
-    parse_duration(&format!("{n}{unit}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_what_how_long_and_where() {
-        let s = Spec::parse("screen for 30s to Demo Video.mkv").unwrap();
-        assert_eq!(
-            s,
-            Spec {
-                kind: Kind::Screen,
-                length: Some(Duration::from_secs(30)),
-                file: Some("Demo Video.mkv".to_owned())
-            }
-        );
-        let s = Spec::parse("the microphone for 2 minutes").unwrap();
-        assert_eq!(
-            (s.kind, s.length),
-            (Kind::Audio, Some(Duration::from_secs(120)))
-        );
-        assert_eq!(Spec::parse("audio").unwrap().length, None);
-        assert!(Spec::parse("the garden").is_err());
-        assert!(Spec::parse("screen for ever").is_err());
-        assert!(Spec::parse("screen for 9h").is_err());
-    }
 }

@@ -1,6 +1,6 @@
 //! ffmpeg inputs on Windows: `gdigrab` for the desktop, DirectShow for the microphone.
 
-use super::Kind;
+use crate::record_spec::Kind;
 
 /// The input arguments for `kind`. DirectShow needs the microphone's exact name, so it asks
 /// ffmpeg for its devices.
