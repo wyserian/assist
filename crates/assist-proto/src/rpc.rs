@@ -312,7 +312,11 @@ impl MemoryRecord {
         } else {
             format!("{} is {}", self.subject, self.fact)
         };
-        format!("{}.", text.trim_end_matches('.'))
+        let text = text.trim_end_matches('.');
+        let mut chars = text.chars();
+        // Spoken input arrives in lower case; a sentence starts with a capital.
+        let first = chars.next().map(|c| c.to_uppercase().collect::<String>());
+        format!("{}{}.", first.unwrap_or_default(), chars.as_str())
     }
 }
 

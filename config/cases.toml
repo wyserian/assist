@@ -151,6 +151,11 @@ command = "recall"
 slots = { subject = "park" }
 
 [[case]]
+text = "where is the car"
+command = "recall"
+slots = { subject = "the car" }
+
+[[case]]
 text = "forget everything"
 command = "forget"
 slots = { subject = "everything" }

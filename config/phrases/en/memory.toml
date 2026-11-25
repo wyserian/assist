@@ -16,6 +16,7 @@ phrases = [
     "do you remember .subject.",
     "what do you know about .subject.",
     "where did i .subject.",
+    "where (is|are) .subject.",
 ]
 
 [forget]
