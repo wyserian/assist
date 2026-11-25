@@ -105,9 +105,14 @@ impl Drop for Daemon {
 }
 
 async fn start(name: &str) -> Daemon {
+    start_with(name, "").await
+}
+
+/// A daemon with config `toml`.
+async fn start_with(name: &str, toml: &str) -> Daemon {
     let dir = std::env::temp_dir().join(format!("assist-daemon-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let config = Arc::new(Config::from_toml("").unwrap());
+    let config = Arc::new(Config::from_toml(toml).unwrap());
     let (store, _) = Store::open(&dir, &config.jobs).unwrap();
     let secrets = Arc::new(Secrets::open(Box::new(Memory::default()), &dir).unwrap());
     let audit = Audit::open(&dir.join("audit")).unwrap();
@@ -1052,4 +1057,70 @@ async fn the_nodes_list_shows_devices_and_removing_one_disconnects_it() {
         .unwrap()
         .all()
         .is_empty());
+}
+
+/// POSTs to `path` with `token` as bearer; the status code and body.
+async fn post(port: u16, path: &str, token: &str) -> (u16, String) {
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\n\
+         Content-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+    );
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    let status = response
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0);
+    let body = response
+        .split("\r\n\r\n")
+        .nth(1)
+        .unwrap_or_default()
+        .to_owned();
+    (status, body)
+}
+
+#[tokio::test]
+async fn a_webhook_with_its_token_runs_its_saved_pipe() {
+    // set_volume runs without a question for local trust; here it is the phone's, so the
+    // job starts and then fails for want of a phone, which is enough.
+    let config = r#"
+        [pipes]
+        hello = { run = "set volume to 30", unattended = true }
+
+        [webhooks]
+        ping = { run = "hello" }
+    "#;
+    let daemon = start_with("hooks", config).await;
+    let mut cli = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+
+    assert_eq!(post(daemon.port, "/hook/nope", "x").await.0, 404);
+    // No token set yet: refused.
+    assert_eq!(post(daemon.port, "/hook/ping", "x").await.0, 401);
+
+    let set = SecretSet {
+        name: "webhook_ping".to_owned(),
+        value: "hook-token-123".to_owned(),
+    };
+    let _: bool = call(&mut cli, rpc::SECRETS_SET, set).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    assert_eq!(post(daemon.port, "/hook/ping", "wrong").await.0, 401);
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let (status, body) = post(daemon.port, "/hook/ping", "hook-token-123").await;
+    assert_eq!(status, 202, "{body}");
+    let started: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(started["run"], "hello");
+    let job = started["jobs"][0].as_u64().unwrap();
+    let jobs: Vec<JobSummary> = call(&mut cli, rpc::JOBS_LIST, ()).await;
+    let summary = jobs.iter().find(|j| j.id == job).expect("the hook's job");
+    assert_eq!(summary.source, "webhook:ping");
+
+    // Called again at once: refused before the token is even looked at.
+    assert_eq!(
+        post(daemon.port, "/hook/ping", "hook-token-123").await.0,
+        429
+    );
 }

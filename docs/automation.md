@@ -8,6 +8,7 @@ assist speak up on its own, and give it standing goals.
 - [Conditions](#conditions)
 - [Schedules](#schedules)
 - [Triggers](#triggers)
+- [Webhooks](#webhooks)
 - [Proactive messages](#proactive-messages)
 - [Autopilot](#autopilot)
 
@@ -125,6 +126,51 @@ watch = "~/Downloads"
 | `watch` | A folder; fires after changes settle for 2 seconds (a copy of many files fires once). Changes in the 10 seconds after it fired are ignored, so a pipe writing into the folder does not loop |
 
 Give exactly one of `on` or `watch`.
+
+## Webhooks
+
+Let another program on this computer start a saved pipe with an HTTP call, for example a
+backup tool when it finishes, a home automation server, or a script:
+
+```toml
+[pipes]
+sort-downloads = { run = "run sort_downloads", unattended = true }
+
+[webhooks]
+downloads = { run = "sort-downloads" }
+```
+
+Give the hook a token (any long random text), stored as the secret `webhook_<name>`:
+
+```sh
+assist secret set webhook_downloads
+```
+
+Then call it:
+
+```sh
+curl -X POST -H "Authorization: Bearer <token>" http://127.0.0.1:7720/hook/downloads
+```
+
+| Answer | Means |
+| --- | --- |
+| `202 {"run": "...", "jobs": [12]}` | Started; the job ids |
+| `200 {"skipped": "..."}` | The pipe's `if` does not hold |
+| `401` | Wrong or missing token (the daemon prints a hint when no token is set) |
+| `404` | No hook with that name |
+| `409 {"error": "..."}` | The pipe may not run unattended, with the reason |
+| `429` | Called again within a second |
+
+Rules:
+
+- A hook is a trigger like a schedule: the caller decides **when** the pipe runs, never
+  **what**. The request body is not read, so nothing in it can become a command.
+- The pipe must be marked `unattended` and run without any confirmation. The job's source is
+  `webhook:<name>`, so it shows in Jobs and Audit.
+- Hook names use `a-z`, `0-9`, `_` and `-` (at most 40 characters).
+- Each hook runs at most once a second; this also slows down guessing tokens.
+- The daemon listens on `127.0.0.1` only, so only programs on this computer can call hooks.
+  The Host header must be `127.0.0.1:<port>` (or `localhost:<port>`).
 
 ## Proactive messages
 

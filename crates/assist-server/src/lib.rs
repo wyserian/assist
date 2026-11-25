@@ -37,6 +37,7 @@ use tokio_util::sync::CancellationToken;
 mod auth;
 mod conn;
 mod devices;
+mod hooks;
 mod nodes;
 mod rpc;
 #[cfg(feature = "telegram")]
@@ -99,6 +100,7 @@ pub async fn serve(
         restart_pending: std::sync::atomic::AtomicBool::new(false),
         next_client: AtomicU64::new(1),
         stop: stop.clone(),
+        hook_calls: hooks::Calls::default(),
     }));
     tokio::spawn(nodes::accept(state.clone(), stop.clone()));
     #[cfg(feature = "telegram")]
@@ -115,6 +117,7 @@ pub async fn serve(
         )
         .route("/ws", get(websocket))
         .route("/auth", post(sign_in))
+        .route("/hook/{name}", post(hooks::call))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state);
     axum::serve(listener, app)
@@ -139,6 +142,8 @@ pub(crate) struct Shared {
     pub(crate) restart_pending: std::sync::atomic::AtomicBool,
     next_client: AtomicU64,
     stop: CancellationToken,
+    /// When each webhook was last called.
+    pub(crate) hook_calls: hooks::Calls,
 }
 
 struct Client {

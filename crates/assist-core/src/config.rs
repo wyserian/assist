@@ -83,7 +83,22 @@ pub struct Config {
     /// Ways in from outside: the Telegram bot.
     #[serde(default)]
     pub sources: SourcesConfig,
+    /// Incoming webhooks: `POST /hook/<name>` runs a saved pipe.
+    #[serde(default)]
+    pub webhooks: BTreeMap<String, WebhookConfig>,
 }
+
+/// `[webhooks] <name> = { run = "<saved pipe>" }`: what `POST /hook/<name>` starts. The
+/// token is the secret `webhook_<name>`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebhookConfig {
+    /// The saved pipe; it must be marked `unattended`.
+    pub run: String,
+}
+
+/// Longest webhook name.
+pub const MAX_HOOK_NAME: usize = 40;
 
 /// `[sources]`: adapters that bring requests in from outside this machine.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -580,25 +595,36 @@ impl Config {
     /// Schedules and triggers name saved pipes marked `unattended` and have exactly one
     /// valid rule each.
     fn validate_triggers(&self) -> Result<(), ConfigError> {
-        let unattended = |section: &str, run: &str| {
-            match self.pipes.get(run) {
+        let unattended = |section: &str, run: &str| match self.pipes.get(run) {
             Some(pipe) if pipe.unattended => Ok(()),
             Some(_) => Err(ConfigError::Invalid(format!(
-                "[[{section}]] {run}: mark the pipe unattended = true to run it with nobody watching"
+                "{section} {run}: mark the pipe unattended = true to run it with nobody watching"
             ))),
             None => Err(ConfigError::Invalid(format!(
-                "[[{section}]] {run}: no saved pipe with that name in [pipes]"
+                "{section} {run}: no saved pipe with that name in [pipes]"
             ))),
-        }
         };
+        for (name, hook) in &self.webhooks {
+            let valid = !name.is_empty()
+                && name.len() <= MAX_HOOK_NAME
+                && name.bytes().all(|b| {
+                    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-'
+                });
+            if !valid {
+                return Err(ConfigError::Invalid(format!(
+                    "[webhooks] {name}: use a-z, 0-9, _ and -, at most {MAX_HOOK_NAME} characters"
+                )));
+            }
+            unattended(&format!("[webhooks] {name}:"), &hook.run)?;
+        }
         for schedule in &self.schedules {
-            unattended("schedules", &schedule.run)?;
+            unattended("[[schedules]]", &schedule.run)?;
             Schedule::parse(schedule.at.as_deref(), schedule.every.as_deref()).map_err(|e| {
                 ConfigError::Invalid(format!("[[schedules]] {}: {e}", schedule.run))
             })?;
         }
         for trigger in &self.triggers {
-            unattended("triggers", &trigger.run)?;
+            unattended("[[triggers]]", &trigger.run)?;
             let invalid = |reason: String| {
                 ConfigError::Invalid(format!("[[triggers]] {}: {reason}", trigger.run))
             };
@@ -853,6 +879,24 @@ pub(crate) fn location(src: &str, err: &toml::de::Error) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn webhooks_need_a_plain_name_and_an_unattended_pipe() {
+        let pipes = "[pipes]
+ok = { run = \"search x\", unattended = true }
+watched = { run = \"search x\" }
+";
+        let config = |hooks: &str| {
+            Config::from_toml(&format!(
+                "{pipes}[webhooks]
+{hooks}"
+            ))
+        };
+        assert!(config("ping = { run = \"ok\" }").is_ok());
+        assert!(config("\"Ping Me\" = { run = \"ok\" }").is_err());
+        assert!(config("ping = { run = \"watched\" }").is_err());
+        assert!(config("ping = { run = \"missing\" }").is_err());
+    }
 
     #[test]
     fn found_apps_never_shadow_config_entries_or_each_other() {

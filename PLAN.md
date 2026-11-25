@@ -951,7 +951,7 @@ recording, facts (battery, Wi-Fi, location).
 
 **Phase 5 — Remote & multi-device**
 QR pairing, signed hello + capabilities, routing, store-and-forward with expiry, Telegram bot,
-mesh, UnifiedPush, Nodes tab, MQTT discovery for Home Assistant, webhooks in.
+mesh, UnifiedPush, Nodes tab, webhooks in. (MQTT discovery for Home Assistant moved to Phase 9.)
 
 **Phase 6 — Messaging as you**
 TDLib (Telegram), WhatsApp via intent + accessibility, notification listener / mirroring.
@@ -968,7 +968,9 @@ Build/test helpers per project, nmap/ffuf/nuclei wrappers with parsed output and
 allowlist, scraping with `scraper` / `chromiumoxide`.
 
 **Phase 9 — Hardware**
-Pi build + GPIO, MQTT broker/client, ESP32 firmware (sensors, relays, voice satellite / room
+Pi build + GPIO, MQTT broker/client, MQTT discovery for Home Assistant (saved pipes marked
+unattended as buttons; each device's battery, charging and online state as sensors; no
+free-text commands), ESP32 firmware (sensors, relays, voice satellite / room
 microphones with reply in the room that asked), Arduino serial.
 
 **Later / maybe:** PTY web shell, SSH server, Tauri tray app, WASM plugins, CRDT sync, Wayland,
@@ -1095,6 +1097,8 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-26 | Store-and-forward and wake (Phase 5 step 3): a request for a paired device that is away waits up to 10 minutes for it to connect (the hub knows every paired device from `peers.json`, not only connected ones). The phone registers with UnifiedPush (connector 3.3.6, Apache-2.0; the ntfy app as distributor, ntfy.sh's public server) and sends its push address in `hello` (additive field `push`, kept in `peers.json`); the hub POSTs an empty wake to it at most once a minute while a request waits. The push carries nothing, the request comes over the authenticated link. The POST uses the system `curl` (https only) like the model downloads, not `reqwest`: the tree has it only without a TLS provider. A push starts a short foreground service (`shortService`, 2.5 min) so the request runs with the app closed; starting the dialer from the background is up to Android, texts work |
 | 2026-11-26 | Nodes tab (Phase 5 step 4): rpc `nodes.list` (every paired device: connected, last connected or disconnected since the daemon started, push address given, requests waiting and running) and `nodes.remove` (local clients only: unpairs, drops the connection, fails its requests). `assist nodes [remove <device>]` and the dashboard's Nodes tab use them. Last seen is kept in memory only |
 | 2026-11-26 | Telegram bot (Phase 5 step 5): `[sources.telegram] { enabled, allowed_user_ids, shell }`, token in the secret `telegram_bot_token` (read by the daemon only, through `Secrets::get`). The daemon long-polls the Bot API with `reqwest` (owner's choice over `teloxide`: no new crates, `rustls-no-provider` plus the process-wide ring provider) and gives each allowed user's private chat its own connection through `conn::run` (`Credential::Telegram`, source `telegram:<id>`, `owner_remote`), so dialogs, Waiting, audit and Clients work unchanged. Questions get Yes/No buttons; job output is batched (0.8 s) and cut at 4000 characters. Shell commands and scripts are denied to Telegram unless `shell = true` (`Policy::deny_from`, a source-level deny over the trust table). Request errors drop their URL, which holds the token. Others and groups are ignored; the daemon prints a stranger's id once, to add to the list. Revoking a Telegram client ends its connection; the next message opens a new one |
+| 2026-11-26 | Webhooks in (Phase 5 step 6): `[webhooks] <name> = { run }` and `POST /hook/<name>` on the daemon's loopback address, with the hook's own token (secret `webhook_<name>`, constant-time compare), one call per second per hook (counted before the token check). A hook is a trigger like a schedule (the caller picks when, never what): the body is not read, the pipe must be `unattended` and run without confirmation, source `webhook:<name>` with the triggers' local principal (an untrusted principal would make nearly every pipe need a confirmation nobody can give). Callers run on this machine only |
+| 2026-11-26 | MQTT discovery for Home Assistant moves from Phase 5 to Phase 9 with the MQTT broker and client work (owner's choice: no Home Assistant to test against now). Scope when built: saved pipes marked unattended as buttons, each device's battery, charging and online state as sensors, no free-text commands. Phase 5 closes with release 0.7.0 |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

@@ -17,6 +17,9 @@ recorded.
 - **Paired devices** connect over iroh with their own key; the computer accepts only keys it
   paired. An unknown key may only pair, with a one-time code that works once for 5 minutes.
   See [devices.md](devices.md).
+- **Webhooks** (`POST /hook/<name>`) need that hook's own token (the secret
+  `webhook_<name>`), are limited to one call a second, and only start a saved pipe marked
+  `unattended`; the request body is never read.
 - **Revoking** a client in the dashboard's Clients tab disconnects it at once.
 
 ## Trust levels

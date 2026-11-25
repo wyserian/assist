@@ -34,6 +34,7 @@ Durations are a number with `s`, `m`, `h` or `d`: `30s`, `10m`, `2h`, `1d`.
 | [`[voice]`](#voice) | Voiceprint threshold, awake window |
 | [`[replies]`](#replies) | Your wording for any reply |
 | [`[sources.telegram]`](#sourcestelegram) | The Telegram bot |
+| [`[webhooks]`](#webhooks) | HTTP calls that start saved pipes |
 | [`[[schedules]]`](#schedules-triggers-proactive-autopilot) | Timed saved pipes |
 | [`[[triggers]]`](#schedules-triggers-proactive-autopilot) | Saved pipes on facts or folder changes |
 | [`[proactive]`](#schedules-triggers-proactive-autopilot) | Messages it sends unasked |
@@ -236,6 +237,17 @@ shell = false
 | `shell` | `false` | Allow shell commands and scripts from Telegram (they still ask first) |
 
 Changes apply after a restart. See [telegram.md](telegram.md).
+
+## [webhooks]
+
+```toml
+[webhooks]
+downloads = { run = "sort-downloads" }
+```
+
+`POST /hook/<name>` with `Authorization: Bearer <token>` starts the saved pipe `run`, which
+must be marked `unattended`. The token is the secret `webhook_<name>`. Names use `a-z`, `0-9`,
+`_` and `-`. See [automation.md](automation.md#webhooks).
 
 ## Schedules, triggers, proactive, autopilot
 

@@ -43,7 +43,8 @@ features are being built (see [Status](#status)).
 - **Pipes.** Chain commands and filters: `ocr screen | filter error | save errors.txt`.
   Saved pipes, retries, error handlers and conditions over device facts.
 - **Automation.** Schedules ("07:30 mon-fri"), folder watches, fact triggers ("battery below
-  20"), proactive messages with quiet hours, and opt-in autopilot goals with budgets.
+  20"), local webhooks, proactive messages with quiet hours, and opt-in autopilot goals with
+  budgets.
 - **Desktop.** Open, close and switch apps (found automatically on Windows), scripts, the system shell
   (`$ ls`), screenshots, screen OCR (Windows), screen and audio recording, transcription,
   bulk rename with undo, web search.
@@ -182,8 +183,8 @@ More in [docs/security.md](docs/security.md).
 | 2 | Desktop voice | Done |
 | 3 | Desktop features, pipes, automation | Done |
 | 4 | Android app | Done (v0.6.0) |
-| 5 | Multiple devices | In progress: pairing, phone commands from the computer, push wake done; Nodes tab, Telegram, MQTT and webhooks to come |
-| 6 to 9 | Messaging, plugins and optional AI, dev tooling, hardware | Planned |
+| 5 | Multiple devices | Done: pairing, phone commands from the computer, push wake, Nodes tab, Telegram bot, local webhooks |
+| 6 to 9 | Messaging, plugins and optional AI, dev tooling, hardware (with MQTT and Home Assistant) | Planned |
 
 ## Building from source
 

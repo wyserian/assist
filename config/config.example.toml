@@ -35,6 +35,13 @@ errors = { run = "run build | filter error | save build-errors.txt", retry = 1 }
 # run = "errors"
 # watch = "~/Downloads"          # fires when something in the folder changes
 
+# Webhooks: POST /hook/<name> with "Authorization: Bearer <token>" starts a saved pipe
+# marked unattended; the token is the secret webhook_<name> (assist secret set
+# webhook_<name>). Only programs on this computer can call it. Example, off by default:
+#
+# [webhooks]
+# errors = { run = "errors" }
+
 # Messages the assistant sends unasked. sink = "speak" goes to assist listen and the
 # dashboard, "notify" to a desktop notification. Mute a rule by saying "stop telling me
 # about <name>" (or typing mute <name>); "tell me about <name> again" undoes it.
