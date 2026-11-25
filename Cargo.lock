@@ -258,7 +258,7 @@ dependencies = [
 
 [[package]]
 name = "assist-actions"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "assist-core",
  "assist-voice",
@@ -281,7 +281,7 @@ dependencies = [
 
 [[package]]
 name = "assist-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "assist-actions",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "assist-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "assist-proto",
  "bzip2 0.6.1",
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "assist-ffi"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "assist-actions",
  "assist-core",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "assist-net"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "assist-core",
  "assist-proto",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "assist-proto"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -370,7 +370,7 @@ dependencies = [
 
 [[package]]
 name = "assist-server"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "assist-core",
  "assist-net",
@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "assist-voice"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "assist-core",

@@ -14,8 +14,8 @@ Sending.
 > run build | filter error | save build-errors.txt
 ```
 
-Version 0.6.0. Pre-release: the desktop and the phone app work every day; the multi-device
-features are being built (see [Status](#status)).
+Version 0.7.0. Pre-release: the desktop, the phone app and the link between them work; see
+[Status](#status) for what comes next.
 
 ## Contents
 
@@ -183,7 +183,7 @@ More in [docs/security.md](docs/security.md).
 | 2 | Desktop voice | Done |
 | 3 | Desktop features, pipes, automation | Done |
 | 4 | Android app | Done (v0.6.0) |
-| 5 | Multiple devices | Done: pairing, phone commands from the computer, push wake, Nodes tab, Telegram bot, local webhooks |
+| 5 | Multiple devices | Done (v0.7.0): pairing, phone commands from the computer, push wake, Nodes tab, Telegram bot, local webhooks |
 | 6 to 9 | Messaging, plugins and optional AI, dev tooling, hardware (with MQTT and Home Assistant) | Planned |
 
 ## Building from source

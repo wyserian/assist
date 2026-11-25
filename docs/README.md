@@ -1,6 +1,6 @@
 # assist documentation
 
-The user and developer guide for assist 0.6.0. The project overview is in the
+The user and developer guide for assist 0.7.0. The project overview is in the
 [README](../README.md); the design and its reasons are in [PLAN.md](../PLAN.md).
 
 ## Using assist
