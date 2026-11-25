@@ -584,7 +584,7 @@ and its license), or OS-level AEC where available (Android `AcousticEchoCanceler
 ### Android (Phase 4)
 
 Kotlin, Jetpack Compose, Coroutines/Flow, DataStore, no Hilt. Core via **UniFFI**, built with
-**cargo-ndk** (`arm64-v8a`). Same sherpa-onnx voice engine through the core. Android Keystore for
+**cargo-ndk** (`arm64-v8a`, `x86_64` for the emulator); the Kotlin bindings call it through JNA. Same sherpa-onnx voice engine through the core. Android Keystore for
 secrets. Details §7.2.
 
 ### Hardware (Phase 9)
@@ -1075,6 +1075,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Proactive engine (Phase 3 step 7): rules in core (`proactive.rs`, pure; `Condition::names` tells job rules from fact rules), runner in the daemon. Delivery chosen by the owner: connected clients (new protocol kind `notice`, topic `notices`) and desktop notifications through `notify-rust` 4.19 (MIT OR Apache-2.0). Mute is an action with `read` capability: it only changes what the assistant tells you |
 | 2026-11-25 | Memory (Phase 3 step 8): JSON file in the data directory rather than a SQLite table (at most 1000 small records, easy to read and export); record type in assist-proto so core, rpc and clients share it. Action `answer` hook beside `preview` so questions are answered in the reply. New capability `memory.write` (allow local, confirm remote and voice, deny untrusted and autopilot), so nobody in the room can plant memories |
 | 2026-11-25 | Autopilot goals, rule-based (Phase 3 step 9, Phase 3 complete): goals reuse saved pipes, the triggers runner and the policy column `autopilot`; budgets and pauses live in the daemon, owner switches in `<data>/autopilot.json`. Stopping is open to everyone as a safety switch, starting needs `config.write`. `paths` deferred until actions declare the paths they touch |
+| 2026-11-25 | Core on Android (Phase 4 step 1): `assistant::assemble` builds the engine, scheduler, audit and store for every device; `assist-ffi` exposes `Assistant` (`say`, `output`) through UniFFI 0.32 (MPL-2.0, per-crate deny exceptions, approved by the owner), with its own tokio runtime and only the phone-safe actions (`transforms`, `memory`, `mute`; the workspace turns `assist-actions` defaults off, the desktop opts in). App in `android/`: Gradle 9.9 wrapper with pinned checksum, AGP 9.5, Kotlin 2.4, Compose, minSdk 26, compileSdk 37.2. Libraries and bindings are build output (`just android`), not committed |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

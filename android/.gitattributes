@@ -1,0 +1,3 @@
+# Batch files need CRLF; the POSIX gradlew needs LF.
+*.bat text eol=crlf
+gradlew text eol=lf
