@@ -36,6 +36,11 @@ pub enum Credential {
     Token,
     /// A browser session cookie.
     Session(String),
+    /// An allowed Telegram user, checked against `[sources.telegram] allowed_user_ids`.
+    Telegram {
+        /// Their Telegram user id.
+        user: i64,
+    },
     /// A paired device, its key checked by iroh.
     Node {
         /// Its name, e.g. `CPH2569`.

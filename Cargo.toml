@@ -33,6 +33,9 @@ iroh = { version = "1.5", default-features = false, features = ["tls-ring"] }
 notify = "9"
 # `assist pair` shows the pairing code as a QR code in the terminal (text renderer only).
 qrcode = { version = "0.15", default-features = false, features = ["std"] }
+# The Telegram bot's HTTPS client; already in the tree through iroh, with its ring TLS.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # OCR on the phone (assist-actions feature `ocr`): pure Rust, models downloaded with consent.
 ocrs = "0.14"
 rten = "0.28"

@@ -175,6 +175,8 @@ pub struct Policy {
     table: BTreeMap<(Capability, Trust), Decision>,
     /// Typed local `$ cmd` runs without asking, unless config overrides the local shell cell.
     typed_local_shell: bool,
+    /// Capabilities denied to one source whatever its trust, e.g. shell over Telegram.
+    denied: Vec<(String, Capability)>,
 }
 
 use Capability as C;
@@ -230,14 +232,37 @@ impl Policy {
         Self {
             table,
             typed_local_shell,
+            denied: Vec::new(),
         }
+    }
+
+    /// Denies `capability` to requests from `source` (`telegram` also covers
+    /// `telegram:<user>`), whatever their trust.
+    #[must_use]
+    pub fn deny_from(mut self, source: &str, capability: Capability) -> Self {
+        self.denied.push((source.to_owned(), capability));
+        self
     }
 
     /// The strictest decision over all capabilities, raised to at least `Confirm` when risky.
     pub fn decide(&self, request: &Request<'_>) -> Decision {
         let trust = request.principal.trust;
+        let source = request.principal.source.as_str();
         let mut decision = if request.risky { Confirm } else { Allow };
         for capability in request.capabilities {
+            let from = |denied: &str| {
+                source == denied
+                    || source
+                        .strip_prefix(denied)
+                        .is_some_and(|rest| rest.starts_with(':'))
+            };
+            if self
+                .denied
+                .iter()
+                .any(|(denied, cap)| cap == capability && from(denied))
+            {
+                return Deny;
+            }
             let mut cell = self
                 .table
                 .get(&(*capability, trust))
@@ -259,6 +284,25 @@ impl Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_source_can_be_denied_a_capability_whatever_its_trust() {
+        let policy = Policy::new(&PolicyOverrides::new()).deny_from("telegram", C::Shell);
+        let ask = |source: &str, caps: &[Capability]| {
+            let principal = Principal::remote(source);
+            policy.decide(&Request {
+                principal: &principal,
+                capabilities: caps,
+                risky: false,
+                typed: true,
+            })
+        };
+        assert_eq!(ask("telegram:42", &[C::Shell]), Deny);
+        assert_eq!(ask("telegram", &[C::Apps, C::Shell]), Deny);
+        assert_eq!(ask("telegramx", &[C::Shell]), Confirm);
+        assert_eq!(ask("node:phone", &[C::Shell]), Confirm);
+        assert_eq!(ask("telegram:42", &[C::Send]), Confirm);
+    }
 
     fn decide(
         policy: &Policy,

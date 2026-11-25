@@ -26,7 +26,7 @@ Every request carries where it came from and a trust level:
 | Trust | Who |
 | --- | --- |
 | `local` | The CLI with the token, the dashboard, the phone app used on the phone itself |
-| `owner_remote` | A paired device acting on the computer, or the computer's requests on the phone |
+| `owner_remote` | A paired device acting on the computer, the computer's requests on the phone, an allowed Telegram user |
 | `voice` | A microphone: anyone in the room, a TV included |
 | `untrusted` | Content: OCR, transcripts, messages, web pages, later LLM proposals and webhooks |
 | `autopilot` | Autopilot goals, running with nobody watching |
@@ -57,6 +57,8 @@ Each action declares capabilities. For each capability and trust level the table
 | `record` | microphone and screen recording | allow | confirm | confirm | deny | deny |
 | `memory.write` | remember | allow | confirm | confirm | deny | deny |
 
+- Telegram is also denied `shell` (shell commands and scripts) unless
+  `[sources.telegram] shell = true`.
 - `risky = true` on a command (`[commands.<name>]` or the dashboard) always asks first.
 - `[policy]` in the config replaces single cells (see [config.md](config.md#policy)):
   ```toml
@@ -115,7 +117,8 @@ or deletion breaks the chain. Secrets are redacted. View it in the dashboard's A
 - The voiceprint stays in the data directory.
 - Voice is processed on the device; the voice models are downloaded only after you agree.
 - Network traffic: the iroh link between your devices (end-to-end encrypted, possibly through
-  n0's relays), the ntfy push (empty messages), web searches you ask for and model downloads.
+  n0's relays), the ntfy push (empty messages), the Telegram Bot API when the bot is on (your
+  messages and replies pass through Telegram), web searches you ask for and model downloads.
 
 ## Reporting a problem
 

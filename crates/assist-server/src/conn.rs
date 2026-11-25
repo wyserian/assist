@@ -89,6 +89,10 @@ pub(crate) async fn run(
             let source = format!("node:{name}");
             (source.clone(), Principal::remote(&source))
         }
+        Credential::Telegram { user } => {
+            let source = format!("telegram:{user}");
+            (source.clone(), Principal::remote(&source))
+        }
     };
     let mut events = state.services.scheduler.subscribe();
     let mut conn = Conn {

@@ -101,6 +101,15 @@ wake_word = ""          # "" for "hey Bee" / "okay Bee"; e.g. "bumblebee" if Bee
 [voice]
 speaker_threshold = 0.35
 
+# The Telegram bot: talk to assist from Telegram. Store the token from @BotFather with
+# assist secret set telegram_bot_token; the daemon prints the user id of anyone who writes
+# to the bot, to put in allowed_user_ids. Shell commands and scripts stay refused unless
+# shell = true. Off by default:
+#
+# [sources.telegram]
+# enabled = true
+# allowed_user_ids = [123456789]
+
 # Reword any reply; keys and defaults are in config/phrases/en/replies.toml.
 [replies]
 cancelled = "Stopped, {address}."

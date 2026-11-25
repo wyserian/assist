@@ -39,6 +39,8 @@ mod conn;
 mod devices;
 mod nodes;
 mod rpc;
+#[cfg(feature = "telegram")]
+mod telegram;
 
 pub use auth::{load_or_create_token, Credential};
 use auth::{Auth, Refusal};
@@ -99,6 +101,8 @@ pub async fn serve(
         stop: stop.clone(),
     }));
     tokio::spawn(nodes::accept(state.clone(), stop.clone()));
+    #[cfg(feature = "telegram")]
+    tokio::spawn(telegram::run(state.clone(), stop.clone()));
     let app = Router::new()
         .route("/", get(|| page(INDEX_HTML, "text/html; charset=utf-8")))
         .route(
@@ -180,6 +184,7 @@ impl Shared {
             Credential::Token => ("cli", None),
             Credential::Session(session) => ("web", Some(session.clone())),
             Credential::Node { .. } => ("node", None),
+            Credential::Telegram { .. } => ("telegram", None),
         };
         let entry = ClientEntry {
             id,

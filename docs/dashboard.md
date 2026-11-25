@@ -82,8 +82,8 @@ on them or waiting for them, what they can do, when they were paired and last se
 ### Clients
 
 Connected clients: id, kind (`cli` for token clients such as `assist run` and
-`assist listen`, `web` for browser sessions, `node` for paired devices), program and since
-when. **Revoke** disconnects one; a revoked browser session must sign in again.
+`assist listen`, `web` for browser sessions, `node` for paired devices, `telegram` for a
+Telegram chat), program and since when. **Revoke** disconnects one; a revoked browser session must sign in again.
 
 ## Safety
 

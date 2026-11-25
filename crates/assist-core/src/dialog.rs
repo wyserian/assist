@@ -146,7 +146,10 @@ impl Engine {
         } = device;
         config.validate_commands(phrases)?;
         let matcher = RuleMatcher::new(phrases, &config)?;
-        let policy = Policy::new(&config.policy);
+        let mut policy = Policy::new(&config.policy);
+        if !config.sources.telegram.shell {
+            policy = policy.deny_from("telegram", Capability::Shell);
+        }
         let mut asks: BTreeMap<String, BTreeMap<String, String>> = phrases
             .commands()
             .map(|(name, spec)| (name.to_owned(), spec.ask.clone()))

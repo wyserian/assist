@@ -15,6 +15,7 @@ The user and developer guide for assist 0.6.0. The project overview is in the
 | [Dashboard](dashboard.md) | Use the web control panel |
 | [Android app](android.md) | Build, install and use the phone app |
 | [Devices](devices.md) | Pair the phone, run phone commands from the computer, wake the phone by push |
+| [Telegram](telegram.md) | Talk to assist from Telegram |
 
 ## Setting it up your way
 

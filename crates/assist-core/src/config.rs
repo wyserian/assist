@@ -80,6 +80,31 @@ pub struct Config {
     /// Standing goals that run with nobody watching.
     #[serde(default)]
     pub autopilot: AutopilotConfig,
+    /// Ways in from outside: the Telegram bot.
+    #[serde(default)]
+    pub sources: SourcesConfig,
+}
+
+/// `[sources]`: adapters that bring requests in from outside this machine.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct SourcesConfig {
+    /// `[sources.telegram]`.
+    pub telegram: TelegramConfig,
+}
+
+/// `[sources.telegram]`: the Telegram bot (PLAN.md section 3.13). Its token is the secret
+/// `telegram_bot_token`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct TelegramConfig {
+    /// Runs the bot.
+    pub enabled: bool,
+    /// Telegram user ids allowed to talk to it, as the owner on a remote device; messages
+    /// from anyone else are ignored.
+    pub allowed_user_ids: Vec<i64>,
+    /// Lets Telegram run shell commands and scripts (asked first); off by default.
+    pub shell: bool,
 }
 
 /// `[autopilot]` (PLAN.md section 3.18).

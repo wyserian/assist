@@ -147,6 +147,16 @@ impl Secrets {
         Ok(true)
     }
 
+    /// The value of secret `name`, for an adapter on this device (the Telegram bot's token).
+    /// Never sent over the wire. Blocking.
+    pub fn get(&self, name: &str) -> Result<Option<String>, SecretError> {
+        validate_name(name)?;
+        if !self.lock().contains_key(name) {
+            return Ok(None);
+        }
+        self.store.get(name)
+    }
+
     /// Every secret's metadata, by name. Never contains values.
     pub fn list(&self) -> BTreeMap<String, SecretInfo> {
         self.lock().clone()

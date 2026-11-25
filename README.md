@@ -51,6 +51,8 @@ features are being built (see [Status](#status)).
   OCR, recording, battery rules, push-to-talk and a hands-free wake word.
 - **Computer and phone together.** Pair the phone with a QR code. Say "call mom" on the
   computer and the phone makes the call. A phone that is away is woken by push.
+- **Telegram.** Talk to assist from anywhere through your own Telegram bot; shell stays off
+  unless you allow it.
 - **Dashboard.** A local web page with chat, jobs, pending confirmations, memory, autopilot,
   secrets, commands, settings, audit log, paired devices and connected clients.
 
@@ -133,6 +135,7 @@ The full list is in [docs/commands.md](docs/commands.md).
 | [Dashboard](docs/dashboard.md) | The web control panel, tab by tab |
 | [Android app](docs/android.md) | Building, installing, permissions and using the phone app |
 | [Devices](docs/devices.md) | Pairing the phone, running phone commands from the computer, push wake-ups |
+| [Telegram](docs/telegram.md) | Talking to assist from Telegram |
 | [Security](docs/security.md) | Trust levels, confirmations, policy, secrets, audit log, network |
 | [Development](docs/development.md) | Workspace, build recipes, tests, code rules, contributing |
 

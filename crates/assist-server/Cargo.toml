@@ -8,8 +8,15 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["telegram"]
+# The Telegram bot ([sources.telegram]).
+telegram = ["dep:reqwest", "dep:rustls"]
+
 [dependencies]
 jiff.workspace = true
+reqwest = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
 assist-core.workspace = true
 assist-net.workspace = true
 assist-proto.workspace = true

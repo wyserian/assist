@@ -33,6 +33,7 @@ Durations are a number with `s`, `m`, `h` or `d`: `30s`, `10m`, `2h`, `1d`.
 | [`[persona]`](#persona) | The assistant's name, how it addresses you, the wake word |
 | [`[voice]`](#voice) | Voiceprint threshold, awake window |
 | [`[replies]`](#replies) | Your wording for any reply |
+| [`[sources.telegram]`](#sourcestelegram) | The Telegram bot |
 | [`[[schedules]]`](#schedules-triggers-proactive-autopilot) | Timed saved pipes |
 | [`[[triggers]]`](#schedules-triggers-proactive-autopilot) | Saved pipes on facts or folder changes |
 | [`[proactive]`](#schedules-triggers-proactive-autopilot) | Messages it sends unasked |
@@ -218,6 +219,23 @@ not_understood = "Say that again?"
 Rewords any reply. The keys and default texts are in
 [`config/phrases/en/replies.toml`](../config/phrases/en/replies.toml); see
 [phrases.md](phrases.md#rewording-replies).
+
+## [sources.telegram]
+
+```toml
+[sources.telegram]
+enabled = false
+allowed_user_ids = []
+shell = false
+```
+
+| Key | Default | What |
+| --- | --- | --- |
+| `enabled` | `false` | Run the Telegram bot; needs the secret `telegram_bot_token` |
+| `allowed_user_ids` | `[]` | Telegram user ids allowed to use it; everyone else is ignored |
+| `shell` | `false` | Allow shell commands and scripts from Telegram (they still ask first) |
+
+Changes apply after a restart. See [telegram.md](telegram.md).
 
 ## Schedules, triggers, proactive, autopilot
 
