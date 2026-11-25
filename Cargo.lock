@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "assist-actions"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "assist-core",
  "assist-voice",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "assist-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assist-actions",
@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "assist-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "assist-proto",
  "bzip2 0.6.1",
@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "assist-ffi"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "assist-actions",
  "assist-core",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "assist-proto"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "assist-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "assist-core",
  "assist-proto",
@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "assist-voice"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assist-core",
@@ -3319,7 +3319,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4727,6 +4727,15 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
+dependencies = [
+ "windows-targets",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets",
 ]
