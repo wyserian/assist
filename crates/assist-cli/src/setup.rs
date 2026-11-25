@@ -6,12 +6,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use assist_core::assistant::{assemble, Host, Parts};
 use assist_core::audit::Audit;
 use assist_core::config::Config;
-use assist_core::dialog::{Device, Engine, LiveEngine};
+use assist_core::dialog::LiveEngine;
 use assist_core::facts::Facts;
 use assist_core::phrases::PhraseSet;
-use assist_core::scheduler::{Persistence, Scheduler};
+use assist_core::scheduler::Scheduler;
 use assist_core::secrets::Secrets;
 use assist_core::store::Store;
 use directories::ProjectDirs;
@@ -126,49 +127,36 @@ impl Assistant {
     /// Loads config and opens the data directory. Prints what it cleaned up from the last run.
     pub fn start(paths: &Paths) -> Result<Self> {
         let config = Arc::new(load_config(paths)?);
-        let audit_dir = paths.data.join("audit");
-        let audit = Audit::open(&audit_dir)
-            .with_context(|| format!("audit log {}", audit_dir.display()))?;
-        let (store, report) = Store::open(&paths.data, &config.jobs)
-            .with_context(|| format!("job store {}", paths.data.display()))?;
-        if report.interrupted > 0 {
-            println!(
-                "{} job(s) from the last run were interrupted.",
-                report.interrupted
-            );
-        }
         // Without a keystore the assistant still runs; secrets and redaction are off.
         let secrets = OsKeystore::open()
             .and_then(|keystore| Secrets::open(Box::new(keystore), &paths.data))
             .map_err(|err| println!("Secrets are off: {err}"))
             .ok()
             .map(Arc::new);
-        let scheduler = Scheduler::new(
-            assist_actions::builtin(),
-            Arc::clone(&config),
-            Persistence {
-                audit: Some(audit.clone()),
-                store: Some(store.clone()),
-                redactor: secrets.as_ref().map(|secrets| secrets.redactor()),
-                data_dir: Some(paths.data.clone()),
-                processes: Some(Arc::new(assist_actions::processes::OsProcesses)),
-            },
-        );
-        let mut phrases = PhraseSet::default_en()?;
-        phrases.extend(PhraseSet::load_dir(&paths.phrases_dir())?);
         let facts = Facts::default();
         tokio::spawn(sample_facts(facts.clone()));
-        let device = Device {
-            commands: scheduler.commands(),
+        let host = Host {
+            actions: assist_actions::builtin(),
+            phrases: PhraseSet::load_dir(&paths.phrases_dir())?,
             offer_shell: true,
             facts: facts.clone(),
-            preview: Some(Arc::new(scheduler.clone())),
+            redactor: secrets.as_ref().map(|secrets| secrets.redactor()),
+            processes: Some(Arc::new(assist_actions::processes::OsProcesses)),
         };
-        let engine = Arc::new(LiveEngine::new(Arc::new(Engine::new(
-            Arc::clone(&config),
-            &phrases,
-            device,
-        )?)));
+        let parts = assemble(Arc::clone(&config), &paths.data, host)?;
+        if parts.report.interrupted > 0 {
+            println!(
+                "{} job(s) from the last run were interrupted.",
+                parts.report.interrupted
+            );
+        }
+        let Parts {
+            audit,
+            store,
+            scheduler,
+            engine,
+            ..
+        } = parts;
         Ok(Self {
             config,
             facts,

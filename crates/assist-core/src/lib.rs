@@ -4,6 +4,7 @@
 //! the mic, speaker, screen or network; its only I/O is its own data directory.
 
 pub mod action;
+pub mod assistant;
 pub mod audit;
 pub mod autopilot;
 pub mod condition;
