@@ -1,0 +1,24 @@
+# Long-term memory. Typed forms keep the text as written: "remember Sam's number is 1234",
+# "forget Sam's number".
+
+[remember]
+slots = { text = "text" }
+reply = "Okay, I'll remember that."
+phrases = [
+    "remember (that)? .text.",
+    "make a note (that)? .text.",
+]
+
+[recall]
+slots = { subject = "text" }
+phrases = [
+    "(what is|what's|what are) .subject.",
+    "do you remember .subject.",
+    "what do you know about .subject.",
+    "where did i .subject.",
+]
+
+[forget]
+slots = { subject = "text" }
+reply = "Forgetting."
+phrases = ["forget (about)? .subject."]

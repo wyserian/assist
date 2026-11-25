@@ -134,6 +134,27 @@ text = "start recording audio for 30 seconds"
 command = "record"
 slots = { spec = "audio for 30 seconds" }
 
+# memory
+[[case]]
+text = "remember that sam's number is 1234"
+command = "remember"
+slots = { text = "sam's number is 1234" }
+
+[[case]]
+text = "what's sam's number"
+command = "recall"
+slots = { subject = "sam's number" }
+
+[[case]]
+text = "where did i park"
+command = "recall"
+slots = { subject = "park" }
+
+[[case]]
+text = "forget everything"
+command = "forget"
+slots = { subject = "everything" }
+
 # proactive messages
 [[case]]
 text = "stop telling me about background failed"

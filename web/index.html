@@ -14,6 +14,7 @@
     <button type="button" data-tab="chat" aria-pressed="true">Chat</button>
     <button type="button" data-tab="jobs">Jobs</button>
     <button type="button" data-tab="waiting">Waiting</button>
+    <button type="button" data-tab="memory">Memory</button>
     <button type="button" data-tab="secrets">Secrets</button>
     <button type="button" data-tab="commands">Commands</button>
     <button type="button" data-tab="settings">Settings</button>
@@ -52,6 +53,15 @@
       <thead><tr><th>Client</th><th>Question</th><th>Asked</th><th>Answer</th></tr></thead>
       <tbody id="waiting-body"></tbody>
     </table>
+  </section>
+
+  <section id="memory" hidden>
+    <p>What the assistant remembers. It stays on this computer. Add with "remember that ...".</p>
+    <table>
+      <thead><tr><th>#</th><th>Remembered</th><th>From</th><th>Added</th><th>Last used</th><th></th></tr></thead>
+      <tbody id="memory-body"></tbody>
+    </table>
+    <button type="button" id="forget-all" class="danger">Forget everything</button>
   </section>
 
   <section id="secrets" hidden>

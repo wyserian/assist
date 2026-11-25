@@ -166,6 +166,7 @@ Default table (overridable in config). Decisions: `allow | confirm | deny`.
 | `net.scan` | confirm + scope allowlist | deny | deny | deny | deny |
 | `secrets.write`, `config.write`, `admin` | allow (dashboard) | deny | deny | deny | deny |
 | `record` (microphone, screen) | allow | confirm | confirm | deny | deny |
+| `memory.write` (remember) | allow | confirm | confirm | deny | deny |
 
 "confirm" for autopilot means the step waits in the dashboard **Waiting** tab (or Telegram) until
 you answer; the goal pauses meanwhile.
@@ -427,6 +428,14 @@ action.
 Rules:
 - **Memory is transparent:** dashboard **Memory** tab lists every record with source; edit,
   delete, export, "forget everything". `assist memory list|forget`.
+- Built (Phase 3): "remember (that) X is Y" stores `{subject, fact, source, created,
+  last_used}` in `<data>/memory.json` (user-only, at most 1000 records; saying a subject again
+  replaces it). "what's X" / "where did I X" / "do you remember X" are answered at once
+  through the action `answer` hook (no job, so voice speaks the answer). "forget X" /
+  "forget everything" preview the exact records and confirm (`delete`). Refused: passwords,
+  codes, keys, tokens, card numbers (13-19 digits passing the checksum). `assist memory`
+  lists, `assist memory forget <id>|all` deletes, dashboard Memory tab (local clients only).
+  Not yet: memory filling slots, editing a record, export beyond the JSON file itself.
 - **Never stored as memory:** secrets, passwords, card numbers, one-time codes, message bodies,
   OCR/scraped text (unless you explicitly say "remember this").
 - **Memory never leaves the device** except the minimal relevant records sent with an opt-in cloud
@@ -1050,6 +1059,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Job control (Phase 3 step 6): pause, resume and per-job CPU and memory, as approved by the owner: `sysinfo` 0.40 (MIT; workspace `rust-version` raised from 1.85 to 1.95 for it, the toolchain is stable) and a second audited `unsafe` module, `processes_win32.rs` (ntdll `NtSuspendProcess` / `NtResumeProcess`). New job state `paused` (wire name `paused`; a paused job at shutdown becomes `interrupted`) |
 | 2026-11-25 | Autostart (Phase 3 step 6): `assist install-autostart [--remove]` starts the daemon at login with the absolute config and data paths of the install. Windows (owner chose hidden): Startup-folder shortcut to `conhost.exe --headless "<assist.exe>" ... serve`, written by PowerShell COM with paths passed as environment variables. Linux: systemd user service, enabled with `systemctl --user enable --now`. Limit: no console, so daemon prints are not seen until a log file exists |
 | 2026-11-25 | Proactive engine (Phase 3 step 7): rules in core (`proactive.rs`, pure; `Condition::names` tells job rules from fact rules), runner in the daemon. Delivery chosen by the owner: connected clients (new protocol kind `notice`, topic `notices`) and desktop notifications through `notify-rust` 4.19 (MIT OR Apache-2.0). Mute is an action with `read` capability: it only changes what the assistant tells you |
+| 2026-11-25 | Memory (Phase 3 step 8): JSON file in the data directory rather than a SQLite table (at most 1000 small records, easy to read and export); record type in assist-proto so core, rpc and clients share it. Action `answer` hook beside `preview` so questions are answered in the reply. New capability `memory.write` (allow local, confirm remote and voice, deny untrusted and autopilot), so nobody in the room can plant memories |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

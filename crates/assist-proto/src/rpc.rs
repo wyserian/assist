@@ -245,6 +245,48 @@ impl std::fmt::Debug for SecretSet {
     }
 }
 
+/// Every long-term memory record, oldest first. Local clients only. Result:
+/// `Vec<MemoryRecord>`.
+pub const MEMORY_LIST: &str = "memory.list";
+/// Deletes memory records. Local clients only. Params: [`MemoryForget`]. Result: `usize`.
+pub const MEMORY_FORGET: &str = "memory.forget";
+
+/// One remembered fact (PLAN.md section 3.17).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryRecord {
+    /// Stable id, for forgetting.
+    pub id: u64,
+    /// What it is about ("Sam's number"); the whole sentence when it has no "is".
+    pub subject: String,
+    /// What is true about it ("1234"); empty when the subject is the whole sentence.
+    pub fact: String,
+    /// Who said it (`cli`, `voice`, `web`).
+    pub source: String,
+    /// When it was added, Unix ms.
+    pub created: u64,
+    /// When it was last recalled, Unix ms.
+    pub last_used: u64,
+}
+
+impl MemoryRecord {
+    /// The record as a sentence: "Sam's number is 1234."
+    pub fn sentence(&self) -> String {
+        let text = if self.fact.is_empty() {
+            self.subject.clone()
+        } else {
+            format!("{} is {}", self.subject, self.fact)
+        };
+        format!("{}.", text.trim_end_matches('.'))
+    }
+}
+
+/// Params of [`MEMORY_FORGET`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryForget {
+    /// Record ids.
+    pub ids: Vec<u64>,
+}
+
 /// A secret name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretName {

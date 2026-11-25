@@ -9,6 +9,8 @@ use assist_core::action::Action;
 pub mod apps;
 #[cfg(feature = "facts")]
 pub mod facts;
+#[cfg(feature = "memory")]
+pub mod memory;
 #[cfg(feature = "mute")]
 pub mod mute;
 #[cfg(feature = "shell")]
@@ -58,6 +60,8 @@ pub fn builtin() -> Vec<Arc<dyn Action>> {
     actions.extend(transcribe::all());
     #[cfg(feature = "mute")]
     actions.extend(mute::all());
+    #[cfg(feature = "memory")]
+    actions.extend(memory::all());
     actions
 }
 

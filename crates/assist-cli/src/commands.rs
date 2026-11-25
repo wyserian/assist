@@ -6,7 +6,8 @@ use std::process::ExitCode;
 
 use anyhow::{bail, Result};
 use assist_proto::rpc::{
-    self, Explain, Explanation, JobRef, Otp, SecretEntry, SecretName, SecretSet,
+    self, Explain, Explanation, JobRef, MemoryForget, MemoryRecord, Otp, SecretEntry, SecretName,
+    SecretSet,
 };
 use assist_proto::{JobState, JobSummary, JobUpdate, Stream};
 
@@ -87,6 +88,51 @@ pub async fn facts(paths: &Paths) -> Result<()> {
     }
     for (name, value) in &facts {
         println!("{} = {}", printable(name), printable(value));
+    }
+    Ok(())
+}
+
+/// Lists memory records, or forgets one (`forget <id>`) or all (`forget all`).
+pub async fn memory(paths: &Paths, action: Option<&str>, target: Option<&str>) -> Result<()> {
+    let mut client = Client::connect(paths.data(), false).await?;
+    let records: Vec<MemoryRecord> = client.call(rpc::MEMORY_LIST, ()).await?;
+    match (action, target) {
+        (None, _) => {
+            if records.is_empty() {
+                println!("Nothing remembered yet.");
+            }
+            for record in &records {
+                println!(
+                    "#{:<4} {}  ({})",
+                    record.id,
+                    printable(&record.sentence()),
+                    record.source
+                );
+            }
+        }
+        (Some("forget"), Some(target)) => {
+            let ids: Vec<u64> = if target == "all" {
+                records.iter().map(|r| r.id).collect()
+            } else {
+                let Ok(id) = target.trim_start_matches('#').parse() else {
+                    bail!("give a record id or all");
+                };
+                vec![id]
+            };
+            if target == "all" && !ids.is_empty() {
+                let answer =
+                    read_line(&format!("Forget all {} records? [y/N] ", ids.len())).await?;
+                if !answer.trim().eq_ignore_ascii_case("y") {
+                    println!("Kept.");
+                    return Ok(());
+                }
+            }
+            let gone: usize = client
+                .call(rpc::MEMORY_FORGET, MemoryForget { ids })
+                .await?;
+            println!("Forgot {gone}.");
+        }
+        _ => bail!("use: assist memory [forget <id>|all]"),
     }
     Ok(())
 }

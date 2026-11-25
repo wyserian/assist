@@ -84,6 +84,13 @@ enum Command {
         #[arg(long)]
         print: bool,
     },
+    /// List what the assistant remembers, or forget a record (`forget <id>` or `forget all`).
+    Memory {
+        /// `forget`.
+        action: Option<String>,
+        /// A record id, or `all`.
+        target: Option<String>,
+    },
     /// Manage secrets (API keys). Values are never shown.
     #[command(subcommand)]
     Secret(SecretCommand),
@@ -147,6 +154,9 @@ fn main() -> Result<ExitCode> {
             Command::Run { text } => return commands::run(&paths, &text.join(" ")).await,
             Command::Jobs => commands::jobs(&paths).await?,
             Command::Facts => commands::facts(&paths).await?,
+            Command::Memory { action, target } => {
+                commands::memory(&paths, action.as_deref(), target.as_deref()).await?;
+            }
             Command::Pause { id } => commands::hold(&paths, &id, true).await?,
             Command::Resume { id } => commands::hold(&paths, &id, false).await?,
             Command::Stop { target } => commands::stop(&paths, &target).await?,

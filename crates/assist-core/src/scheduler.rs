@@ -518,6 +518,14 @@ impl crate::dialog::Preview for Scheduler {
             .get(&plan.command)?
             .preview(plan, &inner.config, inner.data_dir.as_deref())
     }
+
+    fn answer(&self, plan: &Plan) -> Option<Result<String, String>> {
+        let inner = &self.inner;
+        inner
+            .actions
+            .get(&plan.command)?
+            .answer(plan, &inner.config, inner.data_dir.as_deref())
+    }
 }
 
 /// Runs a pipe once its lane has room, holding one slot for the whole group (so a long

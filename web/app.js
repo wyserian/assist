@@ -191,6 +191,7 @@ function refresh(tab) {
   const views = {
     jobs: loadJobs,
     waiting: loadWaiting,
+    memory: loadMemory,
     secrets: loadSecrets,
     commands: loadMisses,
     settings: loadSettings,
@@ -278,6 +279,29 @@ $("stop-all").addEventListener("click", async () => {
     setStatus(err.message);
   }
 });
+
+// --- memory ---
+
+async function loadMemory() {
+  const body = $("memory-body");
+  body.replaceChildren();
+  const records = await rpc("memory.list");
+  const forget = async (ids) => {
+    await rpc("memory.forget", { ids });
+    loadMemory();
+  };
+  for (const record of records) {
+    const sentence = record.fact ? `${record.subject} is ${record.fact}` : record.subject;
+    const remove = button("Forget", () => forget([record.id]), "danger");
+    body.append(row([`#${record.id}`, sentence, record.source, time(record.created), time(record.last_used), remove]));
+  }
+  if (!records.length) body.append(row(["Nothing remembered yet."]));
+  $("forget-all").hidden = !records.length;
+  $("forget-all").onclick = async () => {
+    if (!confirm(`Forget all ${records.length} records? This cannot be undone.`)) return;
+    await forget(records.map((r) => r.id));
+  };
+}
 
 // --- secrets ---
 

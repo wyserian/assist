@@ -88,6 +88,11 @@ pub struct Device {
 pub trait Preview: Send + Sync {
     /// `None` when the command has no preview; `Err` when the plan cannot run as asked.
     fn preview(&self, plan: &Plan) -> Option<Result<Vec<String>, String>>;
+
+    /// An immediate answer that replaces running a job; `None` when the command runs.
+    fn answer(&self, _plan: &Plan) -> Option<Result<String, String>> {
+        None
+    }
 }
 
 impl std::fmt::Debug for dyn Preview {
@@ -980,7 +985,16 @@ impl Dialog {
                 reply.say.push(self.engine.confirm_question(&pipe));
                 self.state = State::Confirming { pipe, intent };
             }
-            Some(Decision::Allow) => self.submit(pipe, intent, reply),
+            Some(Decision::Allow) => {
+                let answer = match pipe.stages.as_slice() {
+                    [plan] => self.engine.preview.as_ref().and_then(|p| p.answer(plan)),
+                    _ => None,
+                };
+                match answer {
+                    Some(Ok(text) | Err(text)) => reply.say.push(text),
+                    None => self.submit(pipe, intent, reply),
+                }
+            }
         }
     }
 

@@ -110,6 +110,9 @@ pub enum Capability {
     /// Record the microphone or the screen.
     #[serde(rename = "record")]
     Record,
+    /// Add to long-term memory.
+    #[serde(rename = "memory.write")]
+    MemoryWrite,
 }
 
 /// The policy's answer. Ordered from least to most strict.
@@ -173,7 +176,7 @@ use Decision::{Allow, Confirm, Deny};
 ///
 /// shortcut: "confirm on screen" for voice and the autopilot path and recipient scopes are a
 /// plain `Confirm`; split them out when voice and autopilot actions exist.
-const DEFAULTS: [(Capability, [Decision; 5]); 13] = [
+const DEFAULTS: [(Capability, [Decision; 5]); 14] = [
     (C::Read, [Allow, Allow, Allow, Confirm, Allow]),
     (C::Apps, [Allow, Allow, Allow, Confirm, Allow]),
     (C::Media, [Allow, Allow, Allow, Confirm, Allow]),
@@ -187,6 +190,7 @@ const DEFAULTS: [(Capability, [Decision; 5]); 13] = [
     (C::ConfigWrite, [Allow, Deny, Deny, Deny, Deny]),
     (C::Admin, [Allow, Deny, Deny, Deny, Deny]),
     (C::Record, [Allow, Confirm, Confirm, Deny, Deny]),
+    (C::MemoryWrite, [Allow, Confirm, Confirm, Deny, Deny]),
 ];
 
 const COLUMNS: [Trust; 5] = [
@@ -291,6 +295,18 @@ mod tests {
         );
         assert_eq!(
             decide(&p, Trust::Untrusted, &[C::Record], false, false),
+            Deny
+        );
+        assert_eq!(
+            decide(&p, Trust::Local, &[C::MemoryWrite], false, false),
+            Allow
+        );
+        assert_eq!(
+            decide(&p, Trust::Voice, &[C::MemoryWrite], false, false),
+            Confirm
+        );
+        assert_eq!(
+            decide(&p, Trust::Autopilot, &[C::MemoryWrite], false, false),
             Deny
         );
     }

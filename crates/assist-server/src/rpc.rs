@@ -7,13 +7,14 @@ use std::sync::Arc;
 
 use assist_core::config::{edit, setting_applies, Applies, SettingValue};
 use assist_core::dialog::SHELL;
+use assist_core::memory;
 use assist_core::phrases::add_user_phrase;
 use assist_core::policy::Trust;
 use assist_core::scheduler::JobInfo;
 use assist_proto::rpc::{
     self, AuditPage, ClientRef, CommandEntry, CommandSetting, DialogAnswer, Explain, History,
-    JobRef, Miss, MissText, Otp, PhraseAdd, SecretEntry, SecretName, SecretSet, SettingChange,
-    SettingResult, Settings,
+    JobRef, MemoryForget, Miss, MissText, Otp, PhraseAdd, SecretEntry, SecretName, SecretSet,
+    SettingChange, SettingResult, Settings,
 };
 use assist_proto::{JobState, Rpc, RpcResult};
 use serde::de::DeserializeOwned;
@@ -120,6 +121,17 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
             let secret: SecretName = parse(params)?;
             let secrets = services.secrets.clone().ok_or_else(no_secrets)?;
             RpcResult::ok(blocking(move || secrets.delete(&secret.name)).await?)
+        }
+        rpc::MEMORY_LIST => {
+            require_local(conn)?;
+            let data = services.data_dir.clone();
+            RpcResult::ok(blocking(move || Ok::<_, String>(memory::list(&data))).await?)
+        }
+        rpc::MEMORY_FORGET => {
+            require_local(conn)?;
+            let forget: MemoryForget = parse(params)?;
+            let data = services.data_dir.clone();
+            RpcResult::ok(blocking(move || memory::forget(&data, &forget.ids)).await?)
         }
         rpc::COMMANDS_EXPLAIN => {
             let explain: Explain = parse(params)?;

@@ -186,9 +186,23 @@ pub trait Action: Send + Sync {
     ) -> Option<Result<Vec<String>, String>> {
         None
     }
+
+    /// The answer to a question that changes nothing, given at once instead of running a
+    /// job. Blocking and bounded; `Err` is the line to say instead.
+    fn answer(
+        &self,
+        _plan: &Plan,
+        _config: &Config,
+        _data_dir: Option<&std::path::Path>,
+    ) -> Option<Result<String, String>> {
+        None
+    }
 }
 
 /// The plan slot that holds a frozen preview, one change per line.
+///
+/// An action may also answer a question at once (`answer`), with no job: "what's Sam's
+/// number". The dialog says the answer, so a voice client speaks it.
 pub const PREVIEW_SLOT: &str = "preview";
 
 /// Whether a run's changes still match the preview that was confirmed.
