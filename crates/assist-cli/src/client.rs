@@ -4,9 +4,9 @@ use std::collections::VecDeque;
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
-use assist_proto::{
-    Envelope, Hello, JobUpdate, Kind, Notice, Reply, Rpc, RpcResult, Subscribe, Utterance, Uuid,
-};
+use assist_proto::{Envelope, Hello, JobUpdate, Kind, Reply, Rpc, RpcResult, Utterance, Uuid};
+#[cfg(feature = "voice")]
+use assist_proto::{Notice, Subscribe};
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -107,6 +107,7 @@ impl Client {
     }
 
     /// Asks for `topics` (`jobs`, `notices`) as they happen.
+    #[cfg(feature = "voice")]
     pub async fn subscribe(&mut self, topics: &[&str]) -> Result<()> {
         let topics = topics.iter().map(|t| (*t).to_owned()).collect();
         self.send(Kind::Subscribe, Subscribe { topics }).await?;
@@ -115,6 +116,7 @@ impl Client {
 
     /// The next proactive message; other messages that arrive meanwhile are skipped.
     /// Cancel-safe, so it can wait in a `select!`.
+    #[cfg(feature = "voice")]
     pub async fn notice(&mut self) -> Result<Notice> {
         loop {
             let message = match self.pending.pop_front() {
