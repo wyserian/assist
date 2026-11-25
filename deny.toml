@@ -28,6 +28,39 @@ unused-allowed-license = "allow"
 crate = "option-ext" # via directories -> dirs-sys
 allow = ["MPL-2.0"]
 
+# UniFFI (assist-ffi, Phase 4): the Kotlin bindings for the Android app, approved by the owner.
+[[licenses.exceptions]]
+crate = "uniffi"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "uniffi_bindgen"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "uniffi_core"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "uniffi_internal_macros"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "uniffi_macros"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "uniffi_meta"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "uniffi_pipeline"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "uniffi_udl"
+allow = ["MPL-2.0"]
+
 # notify (folder triggers, Phase 3) and its hash crate: public domain and Boost, both
 # permissive, approved by the owner with notify.
 [[licenses.exceptions]]

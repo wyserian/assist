@@ -1,0 +1,31 @@
+[package]
+name = "assist-ffi"
+description = "The assist core for the Android app, through UniFFI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+# Generates the Kotlin bindings from the built library; not part of the app.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+assist-core.workspace = true
+assist-actions = { workspace = true, features = ["transforms", "memory", "mute"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+uniffi.workspace = true
+
+[lints]
+workspace = true

@@ -19,7 +19,7 @@ voice = ["dep:assist-voice", "dep:sha2", "assist-actions/transcribe"]
 
 [dependencies]
 anyhow.workspace = true
-assist-actions.workspace = true
+assist-actions = { workspace = true, default-features = true }
 assist-core.workspace = true
 assist-proto.workspace = true
 assist-server.workspace = true
