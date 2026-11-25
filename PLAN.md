@@ -349,10 +349,12 @@ sequenceDiagram
     H->>T: sent
 ```
 
-- **Topology:** hub-and-spoke inside a WireGuard mesh (NetBird or Headscale). The hub never
-  accepts connections from the internet; Telegram and push are outbound.
-- **Pairing:** QR code exchanges ed25519 keys; `hello` is signed and announces capabilities.
-  No own PKI (`rcgen` dropped). Evaluate `iroh` as an all-in-one alternative.
+- **Topology:** hub-and-spoke over `iroh` (QUIC, built into assist on every node, no separate
+  VPN app). Peers dial each other by node key; n0's free public relays only help them find
+  each other and carry encrypted traffic when no direct path exists (self-hostable). The hub
+  accepts only paired keys; Telegram and push are outbound.
+- **Pairing:** QR code exchanges ed25519 keys (the iroh node key is the device identity);
+  `hello` announces capabilities. No own PKI (`rcgen` dropped).
 - **Router** sends a job to a node with the needed capability. **Store-and-forward** queue for
   offline nodes; queued jobs expire (default 1 h → `TimedOut` + reply).
 - **Single owner:** the node running a job owns its state.
@@ -565,7 +567,7 @@ goals created by voice.
 |---|---|
 | TLS | `rustls` |
 | Device identity | `ed25519-dalek`, QR pairing |
-| Mesh | NetBird or Headscale; evaluate `iroh` |
+| Mesh | **Decided:** `iroh` built in (owner's choice; the PC's Tailscale belongs to the employer) |
 | SSH / sandbox (later) | `russh`, `landlock` / bubblewrap |
 | Supply chain | `cargo-deny` (licenses, advisories, bans) |
 | MCP plugins | version + hash pinned in config, never auto-updated |
@@ -1012,7 +1014,7 @@ clipboard sync / send file, more languages + offline translation.
 | CI host | GitHub Actions |
 | Phrase syntax | Own; evaluate `hassil` compatibility before extending |
 | Hub hardware | Laptop now; Pi for always-on later |
-| Mesh | NetBird cloud vs self-hosted Headscale |
+| Mesh | **Decided:** `iroh` built in, free n0 relays, self-hosted relay later if needed |
 
 ## 13. Decision log
 
@@ -1086,6 +1088,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Open and close on the desktop (owner chose): "open X" switches to X's window when it is open, else launches; "close X" asks its windows to close as their close button does (unsaved work still asks). Windows finds the window through PowerShell (process name from the launch value, program description or window title), values passed as environment variables; no new `unsafe`. Linux still always launches and cannot close yet |
 | 2026-11-25 | Awake time is config: `[voice] awake` (5 s to 1 h, default 1 minute, owner's choice; was 8 s), for `assist listen` and the phone's wake word |
 | 2026-11-25 | "shut down" (owner chose: everyone, stops everything): stops the daemon, and so `assist listen`, or the shell, after 2 s so the reply is spoken. Capability `read`, like "stop autopilot". The matcher also skips the assistant's name in front of a request ("bee, open firefox") |
+| 2026-11-25 | Phase 5 network: `iroh` 1.5 (MIT OR Apache-2.0) built into assist instead of a WireGuard mesh app. The owner's PC runs the employer's Tailscale, and a second mesh would clash or need another account; iroh needs neither, works across Wi-Fi and mobile data, and its ed25519 node key is the device identity for pairing. Relays: n0's free public ones (they see only encrypted traffic) |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |
