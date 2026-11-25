@@ -1004,7 +1004,7 @@ clipboard sync / send file, more languages + offline translation.
 | Wire format | JSON (MessagePack later, named encoding) |
 | Voice engine | **Decided:** sherpa-onnx (spike vs Vosk, 2026-11-24) |
 | English STT model | **Decided:** Kroko streaming (`sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`), the most accurate in the spike. Its licence is unclear (non-commercial or CC-BY-SA), so the model is downloaded on first use from the sherpa-onnx release page, never bundled or redistributed, and the model path is config so another model can replace it. Untested permissive fallbacks: NeMo streaming fast-conformer 480 ms (CC-BY-4.0), Parakeet TDT 110M (CC-BY-4.0) |
-| sherpa-onnx linking on Windows | **Decided:** static library plus `+crt-static` for the whole workspace (`.cargo/config.toml`), so `assist.exe` needs no runtime DLLs and `cargo install` works. The build script downloads the library from the sherpa-onnx release without a checksum; set `SHERPA_ONNX_ARCHIVE_DIR` to a verified copy to avoid that |
+| sherpa-onnx linking on Windows | **Decided:** static library plus `+crt-static` for the whole workspace (`.cargo/config.toml`), so `assist.exe` needs no runtime DLLs and `cargo install` works. The build script downloads the library from the sherpa-onnx release without a checksum; set `SHERPA_ONNX_ARCHIVE_DIR` to a verified copy to avoid that. CI fetches the archive itself with a pinned sha256, unpacks it outside `target/` and sets `SHERPA_ONNX_LIB_DIR` (the cache pruned the build script's copy, which broke linking on cache hits) |
 | TTS | OS TTS + Piper/Kokoro as external process (no GPL in the binary) |
 | External plugins | MCP over stdio |
 | Time / file / fact triggers | Yes, Phase 3 |

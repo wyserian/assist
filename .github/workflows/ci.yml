@@ -31,6 +31,24 @@ jobs:
       # cpal (assist-voice) links ALSA on Linux.
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # sherpa-onnx (assist-voice) links a prebuilt library. Its build script downloads it
+      # unverified into target/, which the cache prunes while keeping the build script's
+      # result, so linking fails on a cache hit. Fetch it here with a pinned checksum, outside
+      # target/, every run. Keep the version in step with sherpa-onnx-sys in Cargo.lock.
+      - name: sherpa-onnx library
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux) name=linux-x64-static; sum=f927e695d29b8c7ea3fda97eed215204b210fd57f9faf990a93377bac098ad57 ;;
+            Windows) name=win-x64-static-MT-Release; sum=2dfaeacf899e8d21584caab54a55933b481b5dccbb3615e92daecc6f0618e781 ;;
+          esac
+          file="sherpa-onnx-v2.0.3-$name-lib.tar.bz2"
+          cd "$RUNNER_TEMP"
+          curl --fail --location --silent --show-error --proto =https --output "$file" \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.3/$file"
+          echo "$sum  $file" | sha256sum --check
+          tar --force-local -xjf "$file"
+          echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/${file%.tar.bz2}/lib" >> "$GITHUB_ENV"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo clippy -p assist-actions --no-default-features -- -D warnings
