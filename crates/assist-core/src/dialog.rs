@@ -156,8 +156,20 @@ impl Engine {
                 .or_default()
                 .extend(command.ask.clone());
         }
+        // Every declared slot is needed; one without its own question is asked plainly, so
+        // a phrase that leaves it out ("open chrome" learned before chrome was known) asks
+        // "Which app?" instead of running without it.
+        let replies = Replies::new(&config);
+        for (name, spec) in phrases.commands() {
+            let questions = asks.entry(name.to_owned()).or_default();
+            for slot in spec.slots.keys() {
+                questions
+                    .entry(slot.clone())
+                    .or_insert_with(|| replies.line(Line::MissingSlot, &[("slot", slot)]));
+            }
+        }
         let engine = Self {
-            replies: Replies::new(&config),
+            replies,
             config,
             phrases: phrases.clone(),
             matcher,
@@ -1426,6 +1438,25 @@ alert = { run = "run build | save errors.txt" }
         assert_eq!(reply.missed.as_deref(), Some("make me a sandwich"));
         let reply = dialog.handle(&owner, "open firefox", Instant::now());
         assert_eq!(reply.missed, None);
+    }
+
+    #[test]
+    fn a_phrase_without_its_slot_asks_for_it() {
+        let config = Arc::new(Config::from_toml(CONFIG).unwrap());
+        let phrases = PhraseSet::default_en()
+            .unwrap()
+            .with_phrase("open_app", "open chrome")
+            .unwrap();
+        let engine = Arc::new(Engine::new(config, &phrases, device(commands(), false)).unwrap());
+        assert_eq!(
+            transcript(engine, &["open chrome", "firefox"]),
+            "> open chrome
+< Which app?
+> firefox
+< Opening firefox.
+! open_app: app = firefox
+"
+        );
     }
 
     #[test]

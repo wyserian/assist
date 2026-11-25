@@ -63,11 +63,13 @@ pub enum Line {
     NoOutput,
     /// Input on a conversation another client owns; `{source}`.
     OtherOwner,
+    /// A slot the request left out and its command has no question for; `{slot}`.
+    MissingSlot,
 }
 
 impl Line {
     /// Every line, for validation.
-    pub const ALL: [Line; 26] = [
+    pub const ALL: [Line; 27] = [
         Line::Greeting,
         Line::Wake,
         Line::NotUnderstood,
@@ -94,6 +96,7 @@ impl Line {
         Line::NoInput,
         Line::NoOutput,
         Line::OtherOwner,
+        Line::MissingSlot,
     ];
 
     /// The key in the replies file.
@@ -125,6 +128,7 @@ impl Line {
             Line::NoInput => "no_input",
             Line::NoOutput => "no_output",
             Line::OtherOwner => "other_owner",
+            Line::MissingSlot => "missing_slot",
         }
     }
 
