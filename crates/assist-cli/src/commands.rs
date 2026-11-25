@@ -6,8 +6,8 @@ use std::process::ExitCode;
 
 use anyhow::{bail, Result};
 use assist_proto::rpc::{
-    self, Explain, Explanation, JobRef, MemoryForget, MemoryRecord, Otp, SecretEntry, SecretName,
-    SecretSet,
+    self, AutopilotSet, Explain, Explanation, GoalStatus, JobRef, MemoryForget, MemoryRecord, Otp,
+    SecretEntry, SecretName, SecretSet,
 };
 use assist_proto::{JobState, JobSummary, JobUpdate, Stream};
 
@@ -88,6 +88,50 @@ pub async fn facts(paths: &Paths) -> Result<()> {
     }
     for (name, value) in &facts {
         println!("{} = {}", printable(name), printable(value));
+    }
+    Ok(())
+}
+
+/// Lists autopilot goals, or turns autopilot or one goal on or off.
+pub async fn autopilot(paths: &Paths, action: Option<&str>, goal: Option<String>) -> Result<()> {
+    let mut client = Client::connect(paths.data(), false).await?;
+    let set = match (action.unwrap_or("list"), goal) {
+        ("list", _) => None,
+        ("on", None) => Some(AutopilotSet {
+            goal: None,
+            on: true,
+        }),
+        ("off", None) => Some(AutopilotSet {
+            goal: None,
+            on: false,
+        }),
+        ("resume", Some(goal)) => Some(AutopilotSet {
+            goal: Some(goal),
+            on: true,
+        }),
+        ("pause", Some(goal)) => Some(AutopilotSet {
+            goal: Some(goal),
+            on: false,
+        }),
+        _ => bail!("use: assist autopilot [list | on | off | pause <goal> | resume <goal>]"),
+    };
+    if let Some(set) = set {
+        let _: bool = client.call(rpc::AUTOPILOT_SET, set).await?;
+    }
+    let goals: Vec<GoalStatus> = client.call(rpc::AUTOPILOT_LIST, ()).await?;
+    if goals.is_empty() {
+        println!("No goals in [[autopilot.goals]].");
+    }
+    for goal in &goals {
+        println!(
+            "{:<20} {:<9} {:>3}/{:<3} jobs today  until {}  {}",
+            printable(&goal.name),
+            goal.state,
+            goal.used_today,
+            goal.jobs_per_day,
+            goal.expires,
+            printable(&goal.objective)
+        );
     }
     Ok(())
 }

@@ -1,0 +1,10 @@
+# Autopilot goals ([[autopilot.goals]] in config.toml). Stopping works for anyone; starting
+# again only for the owner at this machine.
+
+[stop_autopilot]
+reply = "Stopping autopilot."
+phrases = ["(stop|pause|halt) (the)? autopilot", "autopilot off"]
+
+[start_autopilot]
+reply = "Starting autopilot."
+phrases = ["(start|resume) (the)? autopilot", "autopilot on"]

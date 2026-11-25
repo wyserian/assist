@@ -7,14 +7,14 @@ use std::sync::Arc;
 
 use assist_core::config::{edit, setting_applies, Applies, SettingValue};
 use assist_core::dialog::SHELL;
-use assist_core::memory;
 use assist_core::phrases::add_user_phrase;
 use assist_core::policy::Trust;
 use assist_core::scheduler::JobInfo;
+use assist_core::{autopilot, memory};
 use assist_proto::rpc::{
-    self, AuditPage, ClientRef, CommandEntry, CommandSetting, DialogAnswer, Explain, History,
-    JobRef, MemoryForget, Miss, MissText, Otp, PhraseAdd, SecretEntry, SecretName, SecretSet,
-    SettingChange, SettingResult, Settings,
+    self, AuditPage, AutopilotSet, ClientRef, CommandEntry, CommandSetting, DialogAnswer, Explain,
+    GoalStatus, History, JobRef, MemoryForget, Miss, MissText, Otp, PhraseAdd, SecretEntry,
+    SecretName, SecretSet, SettingChange, SettingResult, Settings,
 };
 use assist_proto::{JobState, Rpc, RpcResult};
 use serde::de::DeserializeOwned;
@@ -121,6 +121,60 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
             let secret: SecretName = parse(params)?;
             let secrets = services.secrets.clone().ok_or_else(no_secrets)?;
             RpcResult::ok(blocking(move || secrets.delete(&secret.name)).await?)
+        }
+        rpc::AUTOPILOT_LIST => {
+            require_local(conn)?;
+            let engine = services.engine.get();
+            let config = engine.config();
+            let data = services.data_dir.clone();
+            let state = blocking(move || Ok::<_, String>(autopilot::load(&data))).await?;
+            let today = jiff::ZonedDateTime::now().date().to_string();
+            let goals: Vec<GoalStatus> = config
+                .autopilot
+                .goals
+                .iter()
+                .map(|goal| {
+                    let state_name = if !config.autopilot.enabled {
+                        "disabled"
+                    } else if today > goal.expires {
+                        "expired"
+                    } else if state.off {
+                        "off"
+                    } else if state.paused.contains(&goal.name) {
+                        "paused"
+                    } else {
+                        "on"
+                    };
+                    GoalStatus {
+                        name: goal.name.clone(),
+                        objective: goal.objective.clone(),
+                        run: goal.run.clone(),
+                        state: state_name.to_owned(),
+                        used_today: state.used_on(&goal.name, &today),
+                        jobs_per_day: goal.budget.jobs_per_day,
+                        expires: goal.expires.clone(),
+                    }
+                })
+                .collect();
+            RpcResult::ok(goals)
+        }
+        rpc::AUTOPILOT_SET => {
+            require_local(conn)?;
+            let set: AutopilotSet = parse(params)?;
+            let data = services.data_dir.clone();
+            blocking(move || {
+                autopilot::update(&data, |s| match &set.goal {
+                    None => s.off = !set.on,
+                    Some(goal) if set.on => {
+                        s.paused.remove(goal);
+                    }
+                    Some(goal) => {
+                        s.paused.insert(goal.clone());
+                    }
+                })
+            })
+            .await?;
+            RpcResult::ok(true)
         }
         rpc::MEMORY_LIST => {
             require_local(conn)?;

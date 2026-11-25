@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename", "screen", "record", "processes", "mute", "memory"]
+default = ["shell", "scripts", "apps", "search", "transforms", "facts", "rename", "screen", "record", "processes", "mute", "memory", "autopilot"]
 shell = ["dep:process-wrap", "dep:tokio"]
 scripts = ["shell", "dep:toml"]
 apps = ["dep:open", "dep:tokio", "dep:toml"]
@@ -24,6 +24,7 @@ transcribe = ["shell", "dep:assist-voice"]
 processes = ["dep:sysinfo", "dep:windows"]
 mute = ["dep:tokio"]
 memory = ["dep:tokio"]
+autopilot = ["dep:tokio"]
 
 [dependencies]
 assist-core.workspace = true

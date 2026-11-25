@@ -57,6 +57,9 @@ pub async fn run(paths: Paths) -> Result<()> {
             scheduler: assistant.scheduler.clone(),
             facts: assistant.facts.clone(),
             cwd: std::env::current_dir()?,
+            config: assistant.config.clone(),
+            data: paths.data().clone(),
+            notices: notices.clone(),
         },
     );
     proactive::start(

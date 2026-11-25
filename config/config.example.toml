@@ -48,6 +48,23 @@ name = "background failed"
 on = "job.failed and job.lane == 'background'"
 say = "{address}, {title} failed."
 
+# Autopilot: standing goals that run a saved pipe on a trigger with nobody watching. A goal
+# uses only the commands in allow; anything that needs a confirmation pauses it, and so does
+# going past its budget. "stop autopilot" works for anyone; assist autopilot lists goals.
+# Off by default:
+#
+# [autopilot]
+# enabled = true
+#
+# [[autopilot.goals]]
+# name = "nightly-errors"
+# objective = "Collect build errors every night"
+# run = "errors"
+# trigger = { at = "02:00" }   # or every, on, watch
+# allow = ["run_script", "filter", "save"]
+# budget = { jobs_per_day = 20, max_runtime = "10m" }
+# expires = "2026-12-31"
+
 [contacts]
 mom = "+910000000000"
 dad = "+910000000001"

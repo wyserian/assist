@@ -76,6 +76,78 @@ pub struct Config {
     /// Messages the assistant sends unasked.
     #[serde(default)]
     pub proactive: ProactiveConfig,
+    /// Standing goals that run with nobody watching.
+    #[serde(default)]
+    pub autopilot: AutopilotConfig,
+}
+
+/// `[autopilot]` (PLAN.md section 3.18).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct AutopilotConfig {
+    /// Goals run only when this is on.
+    pub enabled: bool,
+    /// The goals.
+    pub goals: Vec<GoalConfig>,
+}
+
+/// `[[autopilot.goals]]`: a saved pipe run on a trigger, inside limits.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoalConfig {
+    /// Name, for `assist autopilot pause <name>` and the audit log.
+    pub name: String,
+    /// What it is for, shown in lists.
+    #[serde(default)]
+    pub objective: String,
+    /// The saved pipe it runs.
+    pub run: String,
+    /// When: one of `at`, `every`, `on` or `watch`, as in schedules and triggers.
+    pub trigger: GoalTrigger,
+    /// The only commands its pipe may use.
+    pub allow: Vec<String>,
+    /// Limits; going past one pauses the goal.
+    #[serde(default)]
+    pub budget: Budget,
+    /// Last day it runs, `YYYY-MM-DD`; renew by moving it.
+    pub expires: String,
+}
+
+/// When a goal runs.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoalTrigger {
+    /// Local time and days, e.g. `07:30 mon-fri`.
+    pub at: Option<String>,
+    /// Interval, e.g. `1h`.
+    pub every: Option<String>,
+    /// What to do when the time passed while the device slept.
+    #[serde(default)]
+    pub missed: Missed,
+    /// A condition over facts.
+    pub on: Option<String>,
+    /// A folder; `~` is the home folder.
+    pub watch: Option<String>,
+}
+
+/// A goal's limits.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Budget {
+    /// Jobs it may start per local day.
+    pub jobs_per_day: u32,
+    /// How long one run may take.
+    #[serde(deserialize_with = "duration")]
+    pub max_runtime: Duration,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Self {
+            jobs_per_day: 50,
+            max_runtime: Duration::from_secs(300),
+        }
+    }
 }
 
 /// Where a proactive message goes.
@@ -432,6 +504,7 @@ impl Config {
         }
         config.validate_triggers()?;
         config.validate_proactive()?;
+        config.validate_goals()?;
         if let Some(key) = config.replies.keys().find(|k| Line::from_key(k).is_none()) {
             return Err(ConfigError::Invalid(format!(
                 "[replies] {key} is not a known reply"
@@ -500,6 +573,57 @@ impl Config {
                 }
                 (None, Some(watch)) if !watch.trim().is_empty() => {}
                 _ => return Err(invalid("give either on or watch".to_owned())),
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_goals(&self) -> Result<(), ConfigError> {
+        let mut names = std::collections::BTreeSet::new();
+        for goal in &self.autopilot.goals {
+            let invalid = |reason: &str| {
+                Err(ConfigError::Invalid(format!(
+                    "[[autopilot.goals]] {}: {reason}",
+                    goal.name
+                )))
+            };
+            let named = !goal.name.is_empty()
+                && goal.name.len() <= 64
+                && goal
+                    .name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+            if !named {
+                return invalid("name: use a-z, 0-9 and -");
+            }
+            if !names.insert(goal.name.as_str()) {
+                return invalid("two goals have this name");
+            }
+            if !self.pipes.contains_key(&goal.run) {
+                return invalid("run must name a saved pipe in [pipes]");
+            }
+            if goal.allow.is_empty() {
+                return invalid("allow lists the commands it may use");
+            }
+            if jiff::civil::Date::strptime("%Y-%m-%d", &goal.expires).is_err() {
+                return invalid("expires: use a date such as 2026-12-31");
+            }
+            let t = &goal.trigger;
+            let rules = [
+                t.at.is_some() || t.every.is_some(),
+                t.on.is_some(),
+                t.watch.is_some(),
+            ];
+            if rules.iter().filter(|r| **r).count() != 1 {
+                return invalid("trigger: give one of at, every, on or watch");
+            }
+            if t.at.is_some() || t.every.is_some() {
+                if let Err(e) = Schedule::parse(t.at.as_deref(), t.every.as_deref()) {
+                    return invalid(&e);
+                }
+            }
+            if let Some(Err(e)) = t.on.as_deref().map(Condition::parse) {
+                return invalid(&e.to_string());
             }
         }
         Ok(())
@@ -660,33 +784,20 @@ mod tests {
 
     #[test]
     fn wake_phrases_follow_the_name_unless_set() {
-        let config = Config::from_toml(
-            "[persona]
-name = \"Bee\"
-",
-        )
-        .unwrap();
+        let config = Config::from_toml("[persona]\nname = \"Bee\"\n").unwrap();
         assert_eq!(
             config.persona.wake_phrases(),
             ["hey Bee", "okay Bee", "ok Bee"]
         );
-        let config = Config::from_toml(
-            "[persona]
-wake_word = \" bumblebee \"
-",
-        )
-        .unwrap();
+        let config = Config::from_toml("[persona]\nwake_word = \" bumblebee \"\n").unwrap();
         assert_eq!(config.persona.wake_phrases(), ["bumblebee"]);
     }
 
     #[test]
     fn a_bad_pipe_condition_is_a_config_error() {
-        let err = Config::from_toml(
-            "[pipes]
-x = { run = \"run build\", if = \"node.battery <\" }
-",
-        )
-        .unwrap_err();
+        let err =
+            Config::from_toml("[pipes]\nx = { run = \"run build\", if = \"node.battery <\" }\n")
+                .unwrap_err();
         assert!(err.to_string().starts_with("[pipes] x: condition"), "{err}");
     }
 
@@ -786,18 +897,9 @@ x = { run = \"run build\", if = \"node.battery <\" }
     #[test]
     fn server_binds_to_loopback_only() {
         assert_eq!(Config::from_toml("").unwrap().server.bind.port(), 7720);
-        assert!(Config::from_toml(
-            "[server]
-bind = \"[::1]:8000\"
-"
-        )
-        .is_ok());
+        assert!(Config::from_toml("[server]\nbind = \"[::1]:8000\"\n").is_ok());
         assert!(matches!(
-            Config::from_toml(
-                "[server]
-bind = \"0.0.0.0:7720\"
-"
-            ),
+            Config::from_toml("[server]\nbind = \"0.0.0.0:7720\"\n"),
             Err(ConfigError::Invalid(_))
         ));
     }

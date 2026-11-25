@@ -7,6 +7,8 @@ use assist_core::action::Action;
 
 #[cfg(feature = "apps")]
 pub mod apps;
+#[cfg(feature = "autopilot")]
+pub mod autopilot;
 #[cfg(feature = "facts")]
 pub mod facts;
 #[cfg(feature = "memory")]
@@ -62,6 +64,8 @@ pub fn builtin() -> Vec<Arc<dyn Action>> {
     actions.extend(mute::all());
     #[cfg(feature = "memory")]
     actions.extend(memory::all());
+    #[cfg(feature = "autopilot")]
+    actions.extend(autopilot::all());
     actions
 }
 

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use assist_proto::rpc::Explanation;
 
 use crate::action::{DataKind, PipeShape, PREVIEW_SLOT};
+use crate::autopilot::NEVER_AUTONOMOUS;
 use crate::condition::Condition;
 use crate::config::{Config, ConfigError};
 use crate::facts::Facts;
@@ -167,6 +168,24 @@ impl Engine {
             facts,
             preview,
         };
+        // A goal may never allow what PLAN.md section 3.18 keeps from autonomy.
+        for goal in &engine.config.autopilot.goals {
+            for command in &goal.allow {
+                let caps = engine
+                    .commands
+                    .get(command)
+                    .map(|i| i.capabilities.as_slice());
+                if let Some(cap) =
+                    caps.and_then(|caps| caps.iter().find(|c| NEVER_AUTONOMOUS.contains(c)))
+                {
+                    return Err(ConfigError::Invalid(format!(
+                        "[[autopilot.goals]] {}: {command} needs {cap:?}, which never runs unattended",
+                        goal.name
+                    ))
+                    .into());
+                }
+            }
+        }
         // A saved pipe that cannot work is a config error now, not when its trigger fires.
         // A stage this device lacks is not: the same config serves devices with other
         // actions, and running it says so.
@@ -369,6 +388,45 @@ impl Engine {
             Some(Decision::Deny) => Err(format!("{name} is not allowed")),
             None => Err(format!("{name} uses a command this device does not have")),
         }
+    }
+
+    /// The pipe of autopilot goal `name` for `principal` (autopilot trust), or why it may
+    /// not run: every stage must be in the goal's `allow` and allowed without a
+    /// confirmation. Named scripts count as granted when the goal allows `run_script`,
+    /// never raw shell. `Ok(None)` when the pipe's `if` does not hold.
+    pub fn autopilot(&self, name: &str, principal: &Principal) -> Result<Option<Pipe>, String> {
+        let goal = self
+            .config
+            .autopilot
+            .goals
+            .iter()
+            .find(|g| g.name == name)
+            .ok_or_else(|| format!("no goal named {name}"))?;
+        if self.unmet_condition(&goal.run).is_some() {
+            return Ok(None);
+        }
+        let pipe = self
+            .saved_pipe(&goal.run)
+            .map_err(|(line, text)| self.say(line, &[("text", &text)]))?;
+        for plan in pipe.stages.iter().chain(&pipe.on_error) {
+            if !goal.allow.contains(&plan.command) {
+                return Err(format!("{} is not in the goal's allow list", plan.command));
+            }
+            let info = self
+                .commands
+                .get(&plan.command)
+                .ok_or_else(|| format!("{} is not available on this device", plan.command))?;
+            let granted_script = info.owner_defined && info.capabilities == [Capability::Shell];
+            match self.decision(principal, plan) {
+                Some(Decision::Allow) => {}
+                Some(Decision::Deny) if granted_script => {}
+                Some(Decision::Confirm) => {
+                    return Err(format!("{} needs a confirmation", plan.command));
+                }
+                _ => return Err(format!("{} is not allowed for autopilot", plan.command)),
+            }
+        }
+        Ok(Some(pipe))
     }
 
     /// A saved pipe's `if` when the current facts do not meet it.
@@ -1391,10 +1449,7 @@ alert = { run = "run build | save errors.txt" }
 
     #[test]
     fn a_saved_pipe_that_cannot_run_is_a_config_error() {
-        let config = format!(
-            "{CONFIG}bad = {{ run = \"head 3\" }}
-"
-        );
+        let config = format!("{CONFIG}bad = {{ run = \"head 3\" }}\n");
         let config = Arc::new(Config::from_toml(&config).unwrap());
         let phrases = PhraseSet::default_en().unwrap();
         let err = Engine::new(config, &phrases, device(commands(), true)).unwrap_err();
@@ -1418,12 +1473,7 @@ alert = { run = "run build | save errors.txt" }
         };
         commands.insert("fetch".to_owned(), info(vec![C::Read], true));
         commands.insert("mail".to_owned(), info(vec![C::Send], false));
-        let config = format!(
-            "{CONFIG}
-[policy]
-send = {{ local = \"allow\" }}
-"
-        );
+        let config = format!("{CONFIG}\n[policy]\nsend = {{ local = \"allow\" }}\n");
         let config = Arc::new(Config::from_toml(&config).unwrap());
         let engine = Arc::new(
             Engine::new(
@@ -1445,8 +1495,7 @@ send = {{ local = \"allow\" }}
     #[test]
     fn a_saved_pipe_runs_only_when_its_if_holds() {
         let config = format!(
-            "{CONFIG}plugged = {{ run = \"run build | count\", if = \"node.charging\" }}
-"
+            "{CONFIG}plugged = {{ run = \"run build | count\", if = \"node.charging\" }}\n"
         );
         let config = Arc::new(Config::from_toml(&config).unwrap());
         let facts = Facts::default();
@@ -1476,11 +1525,12 @@ send = {{ local = \"allow\" }}
 
     #[test]
     fn unattended_runs_need_the_flag_and_no_confirmation() {
-        let extra = "auto = { run = \"run build | count\", unattended = true }
-                     manual = { run = \"run build | count\" }
-                     asks = { run = \"run build | save out.txt\", unattended = true }
-                     later = { run = \"run build\", unattended = true, if = \"node.charging\" }
-";
+        let extra = r#"
+auto = { run = "run build | count", unattended = true }
+manual = { run = "run build | count" }
+asks = { run = "run build | save out.txt", unattended = true }
+later = { run = "run build", unattended = true, if = "node.charging" }
+"#;
         let config = Arc::new(Config::from_toml(&format!("{CONFIG}{extra}")).unwrap());
         let engine = Engine::new(
             config,
@@ -1555,6 +1605,86 @@ send = {{ local = \"allow\" }}
         assert_eq!(ran.run[0].stages[0].slots[PREVIEW_SLOT], "a.jpg -> b.jpg");
         let nothing = dialog.handle(&owner, "rename none", Instant::now());
         assert_eq!(nothing.say, ["Nothing to change."]);
+    }
+
+    #[test]
+    fn autopilot_runs_only_allowed_unconfirmed_stages() {
+        let extra = r#"
+nightly = { run = "run build | count" }
+saving = { run = "run build | save out.txt" }
+
+[autopilot]
+enabled = true
+
+[[autopilot.goals]]
+name = "ok"
+run = "nightly"
+trigger = { every = "1h" }
+allow = ["run_script", "count"]
+expires = "2099-01-01"
+
+[[autopilot.goals]]
+name = "narrow"
+run = "nightly"
+trigger = { every = "1h" }
+allow = ["run_script"]
+expires = "2099-01-01"
+
+[[autopilot.goals]]
+name = "writes"
+run = "saving"
+trigger = { every = "1h" }
+allow = ["run_script", "save"]
+expires = "2099-01-01"
+"#;
+        let config = Arc::new(Config::from_toml(&format!("{CONFIG}{extra}")).unwrap());
+        let engine = Engine::new(
+            config,
+            &PhraseSet::default_en().unwrap(),
+            device(commands(), true),
+        )
+        .unwrap();
+        let goal = Principal {
+            source: "autopilot:ok".to_owned(),
+            user: "owner".to_owned(),
+            trust: Trust::Autopilot,
+        };
+        assert_eq!(
+            engine.autopilot("ok", &goal).unwrap().unwrap().stages.len(),
+            2
+        );
+        assert!(engine
+            .autopilot("narrow", &goal)
+            .unwrap_err()
+            .contains("allow list"));
+        assert!(engine
+            .autopilot("writes", &goal)
+            .unwrap_err()
+            .contains("confirmation"));
+    }
+
+    #[test]
+    fn a_goal_may_not_allow_sending() {
+        let extra = r#"
+nightly = { run = "run build" }
+
+[autopilot]
+
+[[autopilot.goals]]
+name = "spam"
+run = "nightly"
+trigger = { every = "1h" }
+allow = ["run_script", "send_sms"]
+expires = "2099-01-01"
+"#;
+        let config = Arc::new(Config::from_toml(&format!("{CONFIG}{extra}")).unwrap());
+        let err = Engine::new(
+            config,
+            &PhraseSet::default_en().unwrap(),
+            device(commands(), true),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("never runs unattended"), "{err}");
     }
 
     #[test]

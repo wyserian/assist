@@ -5,6 +5,7 @@
 
 pub mod action;
 pub mod audit;
+pub mod autopilot;
 pub mod condition;
 pub mod config;
 pub mod dialog;

@@ -15,6 +15,7 @@
     <button type="button" data-tab="jobs">Jobs</button>
     <button type="button" data-tab="waiting">Waiting</button>
     <button type="button" data-tab="memory">Memory</button>
+    <button type="button" data-tab="autopilot">Autopilot</button>
     <button type="button" data-tab="secrets">Secrets</button>
     <button type="button" data-tab="commands">Commands</button>
     <button type="button" data-tab="settings">Settings</button>
@@ -62,6 +63,15 @@
       <tbody id="memory-body"></tbody>
     </table>
     <button type="button" id="forget-all" class="danger">Forget everything</button>
+  </section>
+
+  <section id="autopilot" hidden>
+    <p>Standing goals from [[autopilot.goals]]. Each runs only its allowed commands, inside its budget.</p>
+    <table>
+      <thead><tr><th>Goal</th><th>State</th><th>Jobs today</th><th>Until</th><th>Objective</th><th></th></tr></thead>
+      <tbody id="autopilot-body"></tbody>
+    </table>
+    <button type="button" id="autopilot-switch"></button>
   </section>
 
   <section id="secrets" hidden>

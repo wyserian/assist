@@ -192,6 +192,7 @@ function refresh(tab) {
     jobs: loadJobs,
     waiting: loadWaiting,
     memory: loadMemory,
+    autopilot: loadAutopilot,
     secrets: loadSecrets,
     commands: loadMisses,
     settings: loadSettings,
@@ -279,6 +280,28 @@ $("stop-all").addEventListener("click", async () => {
     setStatus(err.message);
   }
 });
+
+// --- autopilot ---
+
+async function loadAutopilot() {
+  const body = $("autopilot-body");
+  body.replaceChildren();
+  const goals = await rpc("autopilot.list");
+  const set = (params) => rpc("autopilot.set", params).then(loadAutopilot).catch((err) => setStatus(err.message));
+  for (const goal of goals) {
+    const actions = document.createElement("span");
+    if (goal.state === "on") actions.append(button("Pause", () => set({ goal: goal.name, on: false })));
+    if (goal.state === "paused") actions.append(button("Resume", () => set({ goal: goal.name, on: true })));
+    body.append(row([goal.name, goal.state, `${goal.used_today}/${goal.jobs_per_day}`, goal.expires, goal.objective, actions]));
+  }
+  if (!goals.length) body.append(row(["No goals in [[autopilot.goals]]."]));
+  const off = goals.some((goal) => goal.state === "off");
+  const toggle = $("autopilot-switch");
+  toggle.hidden = !goals.length;
+  toggle.textContent = off ? "Turn autopilot on" : "Stop autopilot";
+  toggle.className = off ? "" : "danger";
+  toggle.onclick = () => set({ on: off });
+}
 
 // --- memory ---
 

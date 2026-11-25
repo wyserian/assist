@@ -476,6 +476,20 @@ column — the core flow (§3.2) does not change.
 
 Phases: rule-based goals (saved pipes + triggers + budgets) in Phase 3; LLM planning in Phase 7.
 
+Built (Phase 3): `[autopilot] enabled` and `[[autopilot.goals]] { name, objective, run (saved
+pipe), trigger { at | every | on | watch, missed }, allow, budget { jobs_per_day (50),
+max_runtime (5m) }, expires (YYYY-MM-DD) }`. Goals run from the triggers runner with trust
+`autopilot` and source `autopilot:<goal>`. Every stage must be in `allow` and allowed without a
+confirmation (named scripts count as granted when `run_script` is allowed; raw shell never);
+otherwise the goal pauses and the owner gets a notice. Config loading rejects a goal that
+allows a command needing `delete`, `send`, `net.scan`, `secrets.write`, `config.write`,
+`admin`, `record` or `memory.write`. A run past `max_runtime` is stopped and pauses the goal;
+past `jobs_per_day` it pauses. Controls: `assist autopilot [on|off|pause X|resume X]`, the
+dashboard Autopilot tab, "stop autopilot" (anyone), "start autopilot" (local only); state in
+`<data>/autopilot.json`. Not yet: `paths` (writing only inside the goal's folders needs
+actions to declare the paths they touch), retries and `on_error` counted against the budget,
+goals created by voice.
+
 ---
 
 ## 4. Tech stack (final)
@@ -1060,6 +1074,7 @@ clipboard sync / send file, more languages + offline translation.
 | 2026-11-25 | Autostart (Phase 3 step 6): `assist install-autostart [--remove]` starts the daemon at login with the absolute config and data paths of the install. Windows (owner chose hidden): Startup-folder shortcut to `conhost.exe --headless "<assist.exe>" ... serve`, written by PowerShell COM with paths passed as environment variables. Linux: systemd user service, enabled with `systemctl --user enable --now`. Limit: no console, so daemon prints are not seen until a log file exists |
 | 2026-11-25 | Proactive engine (Phase 3 step 7): rules in core (`proactive.rs`, pure; `Condition::names` tells job rules from fact rules), runner in the daemon. Delivery chosen by the owner: connected clients (new protocol kind `notice`, topic `notices`) and desktop notifications through `notify-rust` 4.19 (MIT OR Apache-2.0). Mute is an action with `read` capability: it only changes what the assistant tells you |
 | 2026-11-25 | Memory (Phase 3 step 8): JSON file in the data directory rather than a SQLite table (at most 1000 small records, easy to read and export); record type in assist-proto so core, rpc and clients share it. Action `answer` hook beside `preview` so questions are answered in the reply. New capability `memory.write` (allow local, confirm remote and voice, deny untrusted and autopilot), so nobody in the room can plant memories |
+| 2026-11-25 | Autopilot goals, rule-based (Phase 3 step 9, Phase 3 complete): goals reuse saved pipes, the triggers runner and the policy column `autopilot`; budgets and pauses live in the daemon, owner switches in `<data>/autopilot.json`. Stopping is open to everyone as a safety switch, starting needs `config.write`. `paths` deferred until actions declare the paths they touch |
 | 2026-11-23 | Jarvis layer (§3.17): persona, local memory, proactive engine, conversation mode, barge-in, room mics; spread over Phases 2, 3, 7, 9 |
 | 2026-11-23 | Name: project `assist` (crates `assist-*`, binary `assist`). Persona name, wake word and owner address are config only (`[persona]`, defaults "Bee" / "Prime", wake fallback "bumblebee"); nothing persona-specific in code |
 | 2026-11-23 | Autopilot mode (§3.18): opt-in standing goals with allowlists, path scopes, budgets, expiry and an `autopilot` policy column; rules in Phase 3, LLM planning in Phase 7 |

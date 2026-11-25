@@ -1085,11 +1085,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn paused_jobs_keep_their_time_and_resume() {
         let processes = Arc::new(FakeProcesses::default());
-        let mut s = scheduler(
-            "[jobs]
-timeout = \"10s\"
-",
-        );
+        let mut s = scheduler("[jobs]\ntimeout = \"10s\"\n");
         Arc::get_mut(&mut s.inner).unwrap().processes = Some(processes.clone());
         let mut events = s.subscribe();
         let id = submit(&s, "slow");

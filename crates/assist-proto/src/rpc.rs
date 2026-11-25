@@ -251,6 +251,42 @@ pub const MEMORY_LIST: &str = "memory.list";
 /// Deletes memory records. Local clients only. Params: [`MemoryForget`]. Result: `usize`.
 pub const MEMORY_FORGET: &str = "memory.forget";
 
+/// Autopilot goals and their state. Local clients only. Result: `Vec<GoalStatus>`.
+pub const AUTOPILOT_LIST: &str = "autopilot.list";
+/// Turns autopilot or one goal on or off. Local clients only. Params: [`AutopilotSet`].
+/// Result: `bool`.
+pub const AUTOPILOT_SET: &str = "autopilot.set";
+
+/// One autopilot goal as listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalStatus {
+    /// Name.
+    pub name: String,
+    /// What it is for.
+    pub objective: String,
+    /// The saved pipe it runs.
+    pub run: String,
+    /// `on`, `paused`, `off` (autopilot stopped), `disabled` (`[autopilot] enabled = false`)
+    /// or `expired`.
+    pub state: String,
+    /// Jobs started today.
+    pub used_today: u32,
+    /// Jobs allowed per day.
+    pub jobs_per_day: u32,
+    /// Last day it runs.
+    pub expires: String,
+}
+
+/// Params of [`AUTOPILOT_SET`]: a goal, or every goal when `goal` is empty.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutopilotSet {
+    /// The goal; `None` for autopilot as a whole.
+    #[serde(default)]
+    pub goal: Option<String>,
+    /// On (resume) or off (pause).
+    pub on: bool,
+}
+
 /// One remembered fact (PLAN.md section 3.17).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRecord {

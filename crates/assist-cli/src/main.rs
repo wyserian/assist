@@ -84,6 +84,13 @@ enum Command {
         #[arg(long)]
         print: bool,
     },
+    /// Autopilot goals: list, on, off, pause <goal> or resume <goal>.
+    Autopilot {
+        /// `list` (default), `on`, `off`, `pause` or `resume`.
+        action: Option<String>,
+        /// The goal for pause and resume.
+        goal: Option<String>,
+    },
     /// List what the assistant remembers, or forget a record (`forget <id>` or `forget all`).
     Memory {
         /// `forget`.
@@ -154,6 +161,9 @@ fn main() -> Result<ExitCode> {
             Command::Run { text } => return commands::run(&paths, &text.join(" ")).await,
             Command::Jobs => commands::jobs(&paths).await?,
             Command::Facts => commands::facts(&paths).await?,
+            Command::Autopilot { action, goal } => {
+                commands::autopilot(&paths, action.as_deref(), goal).await?;
+            }
             Command::Memory { action, target } => {
                 commands::memory(&paths, action.as_deref(), target.as_deref()).await?;
             }
