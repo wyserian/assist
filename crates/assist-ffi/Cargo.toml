@@ -22,11 +22,14 @@ bindgen = ["uniffi/cli"]
 
 [dependencies]
 assist-core.workspace = true
+assist-net.workspace = true
+assist-proto.workspace = true
 assist-voice.workspace = true
 assist-actions = { workspace = true, features = ["transforms", "memory", "mute", "ocr"] }
+iroh.workspace = true
 thiserror.workspace = true
 toml.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time"] }
 uniffi.workspace = true
 
 [dev-dependencies]

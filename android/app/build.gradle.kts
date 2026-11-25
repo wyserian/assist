@@ -42,6 +42,11 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.activity.compose)
     implementation(libs.coroutines.android)
+    // Scanning the pairing code: CameraX frames, ZXing's decoder.
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.camera.view)
+    implementation(libs.zxing.core)
     // The UniFFI Kotlin bindings call the Rust core through JNA.
     implementation("${libs.jna.get()}@aar")
 }

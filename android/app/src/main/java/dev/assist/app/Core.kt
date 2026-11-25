@@ -5,6 +5,7 @@ import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.os.Build as Device
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -71,6 +72,16 @@ class Core(private val app: Application) {
     var confirming by mutableStateOf(false)
         private set
 
+    /** The paired computer's name, or null before pairing. */
+    var computer by mutableStateOf<String?>(null)
+        private set
+
+    /** Typed and push-to-talk requests go to the paired computer instead of this phone. */
+    var useComputer by mutableStateOf(false)
+
+    /** The pairing dialog is open. */
+    var linking by mutableStateOf(false)
+
     /** Voice models waiting for the user's consent to download; empty when none. */
     var offer by mutableStateOf<List<ModelFile>>(emptyList())
         private set
@@ -82,6 +93,7 @@ class Core(private val app: Application) {
         offer = ::offerModels,
         askScreen = { screenConsents.trySend(Unit) },
         tell = { text, speak -> scope.launch { notice(text, speak) } },
+        showLine = { text -> scope.launch { show(false, text) } },
     )
     private val facts = PhoneFacts(app) { name, value -> assistant?.setFact(name, value) }
     private var notices = 0
@@ -111,6 +123,27 @@ class Core(private val app: Application) {
         // The contact list is read when the core starts.
         if (granted && permission == CONTACTS) start()
         if (permission == MIC) afterMic?.takeIf { granted }?.invoke()
+    }
+
+    /** Pairs with the computer whose code (`assist pair`) is [code]. */
+    fun pair(code: String) {
+        val core = assistant ?: return
+        linking = false
+        show(false, "Linking to the computer.")
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { core.pairWith(code, Device.MODEL) }
+            }
+            result.onSuccess {
+                computer = it
+                useComputer = true
+                show(false, "Linked to $it. What you type now goes there; switch it off for this phone.")
+            }
+            result.onFailure { err ->
+                if (err !is AssistException) throw err
+                show(false, "Not linked: ${err.message}")
+            }
+        }
     }
 
     /** Sends what the user typed. */
@@ -240,6 +273,10 @@ class Core(private val app: Application) {
     private fun converse(text: String, via: Via, vouched: Boolean = false) {
         val core = assistant ?: return
         show(true, text)
+        if (useComputer && via != Via.WAKE) {
+            remote(core, text, spoken = via == Via.TALK)
+            return
+        }
         scope.launch {
             val answer = withContext(Dispatchers.IO) {
                 if (via == Via.WAKE) core.hear(text, vouched) else core.say(text)
@@ -248,6 +285,21 @@ class Core(private val app: Application) {
             if (via != Via.TYPED) speak(answer.say)
             if (via == Via.WAKE) confirming = answer.waiting
             answer.jobs.forEach { launch { follow(core, it) } }
+        }
+    }
+
+    /** Says [text] to the paired computer and shows its answer. */
+    private fun remote(core: Assistant, text: String, spoken: Boolean) {
+        scope.launch {
+            val answer = withContext(Dispatchers.IO) { runCatching { core.sayRemote(text) } }
+            answer.onSuccess {
+                it.say.forEach { line -> show(false, line) }
+                if (spoken) speak(it.say)
+            }
+            answer.onFailure { err ->
+                if (err !is AssistException) throw err
+                show(false, "The computer: ${err.message}")
+            }
         }
     }
 
@@ -269,6 +321,7 @@ class Core(private val app: Application) {
             }
             opened.onSuccess {
                 assistant = it
+                computer = it.pairedComputer()
                 facts.replay()
             }
             opened.onFailure { err ->

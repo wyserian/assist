@@ -12,8 +12,11 @@
     <!-- Screen recording, after Android's capture prompt each time. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Only to download the voice models, after the user agrees. -->
+    <!-- Model downloads after the user agrees, and the link to the paired computer. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only while scanning the computer's pairing code. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- "open camera": the launcher apps, by label. -->

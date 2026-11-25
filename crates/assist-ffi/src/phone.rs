@@ -47,6 +47,8 @@ pub trait Phone: Send + Sync {
     fn stop_recording(&self) -> Result<String, PhoneError>;
     /// A proactive message ("battery is low"): spoken when `speak`, else a notification.
     fn notice(&self, text: String, speak: bool) -> Result<(), PhoneError>;
+    /// A line from the paired computer (its jobs' output) for the chat.
+    fn show(&self, text: String) -> Result<(), PhoneError>;
 }
 
 /// What to record.
@@ -75,28 +77,41 @@ impl From<uniffi::UnexpectedUniFFICallbackError> for PhoneError {
     }
 }
 
+/// The commands a phone action runs, except `record`.
+static MANIFESTS: [&Manifest; 7] = [
+    &OPEN_APP,
+    &CALL,
+    &SEND_SMS,
+    &SET_VOLUME,
+    &LOCK,
+    &SCREENSHOT,
+    &OCR,
+];
+
+/// What the phone can do for a paired computer: its commands' names.
+pub(crate) fn capabilities() -> Vec<String> {
+    MANIFESTS
+        .iter()
+        .map(|manifest| manifest.name)
+        .chain([RECORD.name])
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The phone actions, calling `phone`.
 pub fn all(phone: &Arc<dyn Phone>) -> Vec<Arc<dyn Action>> {
-    [
-        &OPEN_APP,
-        &CALL,
-        &SEND_SMS,
-        &SET_VOLUME,
-        &LOCK,
-        &SCREENSHOT,
-        &OCR,
-    ]
-    .into_iter()
-    .map(|manifest| {
-        Arc::new(PhoneAction {
-            manifest,
+    MANIFESTS
+        .into_iter()
+        .map(|manifest| {
+            Arc::new(PhoneAction {
+                manifest,
+                phone: Arc::clone(phone),
+            }) as Arc<dyn Action>
+        })
+        .chain([Arc::new(Record {
             phone: Arc::clone(phone),
-        }) as Arc<dyn Action>
-    })
-    .chain([Arc::new(Record {
-        phone: Arc::clone(phone),
-    }) as Arc<dyn Action>])
-    .collect()
+        }) as Arc<dyn Action>])
+        .collect()
 }
 
 const fn manifest(name: &'static str, capability: &'static [Capability]) -> Manifest {

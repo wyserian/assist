@@ -1,6 +1,8 @@
 package dev.assist.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -109,6 +112,16 @@ private fun Chat(model: Core) {
             Text("Listen for the wake word", Modifier.weight(1f))
             Switch(checked = model.handsFree, onCheckedChange = { model.toggleHandsFree() })
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val computer = model.computer
+            if (computer == null) {
+                Text("No computer linked", Modifier.weight(1f))
+                TextButton(onClick = { model.linking = true }) { Text("Link to computer") }
+            } else {
+                Text("Send to $computer", Modifier.weight(1f))
+                Switch(checked = model.useComputer, onCheckedChange = { model.useComputer = it })
+            }
+        }
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
             state = list,
@@ -138,6 +151,7 @@ private fun Chat(model: Core) {
             }
         }
     }
+    if (model.linking) LinkDialog(model)
     if (model.offer.isNotEmpty()) {
         val files = model.offer.joinToString("\n") { "${it.name}: ${it.sizeMb} MB, licence ${it.licence}" }
         AlertDialog(
@@ -149,6 +163,55 @@ private fun Chat(model: Core) {
         )
     }
 }
+
+/** Pairing with a computer: scan the code `assist pair` shows, or paste its text. */
+@Composable
+private fun LinkDialog(model: Core) {
+    var code by rememberSaveable { mutableStateOf("") }
+    var scanning by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        scanning = granted
+    }
+    AlertDialog(
+        onDismissRequest = { model.linking = false },
+        title = { Text("Link to computer") },
+        text = {
+            Column {
+                Text("On the computer run: assist pair. Then scan the code or paste its text.")
+                if (scanning) {
+                    QrScanner(Modifier.fillMaxWidth().height(260.dp).padding(top = 8.dp)) {
+                        scanning = false
+                        model.pair(it)
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it.take(MAX_CODE) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        placeholder = { Text("assist-pair:...") },
+                        singleLine = true,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = code.isNotBlank(), onClick = { model.pair(code.trim()) }) { Text("Link") }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                    scanning = true
+                } else {
+                    camera.launch(Manifest.permission.CAMERA)
+                }
+            }) { Text("Scan") }
+        },
+    )
+}
+
+/** Longest pairing code accepted. */
+private const val MAX_CODE = 200
 
 @Composable
 private fun Bubble(line: Line) {

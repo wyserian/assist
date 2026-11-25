@@ -4,6 +4,7 @@
 //! word, and shows the answer; jobs run on the core's own tokio runtime. Phone actions call
 //! back into the app through [`phone::Phone`].
 
+mod link;
 pub mod models;
 pub mod phone;
 pub mod voice;
@@ -75,6 +76,9 @@ pub enum AssistError {
     /// A voice model is missing, broken or failed its checksum.
     #[error("{0}")]
     Voice(String),
+    /// Pairing with or reaching the computer failed.
+    #[error("{0}")]
+    Link(String),
 }
 
 /// What the assistant answers.
@@ -113,6 +117,9 @@ pub struct Assistant {
     wake_phrases: Vec<String>,
     awake_seconds: u32,
     woke: String,
+    phone: Arc<dyn Phone>,
+    /// The paired computer and the conversation with it.
+    link: tokio::sync::Mutex<link::Link>,
 }
 
 /// A dialog and who it speaks for.
@@ -158,6 +165,7 @@ impl Assistant {
         let home = PathBuf::from(data_dir);
         let mut actions = assist_actions::builtin();
         actions.extend(phone::all(&phone));
+        let caller = Arc::clone(&phone);
         let facts = Facts::default();
         let host = Host {
             actions,
@@ -196,6 +204,8 @@ impl Assistant {
             wake_phrases,
             awake_seconds,
             woke,
+            phone: caller,
+            link: tokio::sync::Mutex::default(),
         }))
     }
 
@@ -227,6 +237,46 @@ impl Assistant {
     /// The wake phrases from `[persona]`, for the hands-free listener.
     pub fn wake_phrases(&self) -> Vec<String> {
         self.wake_phrases.clone()
+    }
+
+    /// Pairs with the computer whose code (`assist pair`) is `code`, as `device_name`;
+    /// returns the computer's name. Needs the network; waits up to half a minute.
+    pub fn pair_with(&self, code: String, device_name: String) -> Result<String, AssistError> {
+        self.runtime
+            .block_on(async {
+                self.link
+                    .lock()
+                    .await
+                    .pair(&self.home, &code, &device_name, phone::capabilities())
+                    .await
+            })
+            .map_err(AssistError::Link)
+    }
+
+    /// The computer this phone is paired with, if any.
+    pub fn paired_computer(&self) -> Option<String> {
+        link::paired(&self.home)
+    }
+
+    /// Says `text` to the paired computer's assistant, as its owner; its jobs' output comes
+    /// later through the phone's `show`.
+    pub fn say_remote(&self, text: String) -> Result<Answer, AssistError> {
+        let reply = self
+            .runtime
+            .block_on(async {
+                self.link
+                    .lock()
+                    .await
+                    .say(&self.home, &text, &self.phone)
+                    .await
+            })
+            .map_err(AssistError::Link)?;
+        Ok(Answer {
+            say: reply.say,
+            // The computer's job ids mean nothing here; their output arrives through `show`.
+            jobs: Vec::new(),
+            waiting: reply.waiting,
+        })
     }
 
     /// How long requests need no wake word after the last one (`[voice] awake`).
@@ -378,6 +428,9 @@ mod tests {
         }
         fn notice(&self, text: String, speak: bool) -> Result<(), PhoneError> {
             self.log(format!("notice {speak} {text}"))
+        }
+        fn show(&self, text: String) -> Result<(), PhoneError> {
+            self.log(format!("show {text}"))
         }
     }
 

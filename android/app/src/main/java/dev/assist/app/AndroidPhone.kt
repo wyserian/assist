@@ -26,7 +26,8 @@ import kotlin.math.roundToInt
  * What the core asks the phone to do. Policy and confirmation already happened in the core;
  * this only checks the Android permission, asking for it through [ask] when it is missing,
  * shows the model download offer through [offer], the screen capture prompt through
- * [askScreen] and proactive messages through [tell].
+ * [askScreen], proactive messages through [tell] and the paired computer's lines through
+ * [showLine].
  */
 class AndroidPhone(
     private val context: Context,
@@ -34,6 +35,7 @@ class AndroidPhone(
     private val offer: (Feature) -> Unit,
     private val askScreen: () -> Unit,
     private val tell: (String, Boolean) -> Unit,
+    private val showLine: (String) -> Unit,
 ) : Phone {
     override fun openApp(packageName: String) {
         val intent = context.packageManager.getLaunchIntentForPackage(packageName)
@@ -100,6 +102,8 @@ class AndroidPhone(
     override fun stopRecording(): String = Recordings.stop()
 
     override fun notice(text: String, speak: Boolean) = tell(text, speak)
+
+    override fun show(text: String) = showLine(text)
 
     private fun shot(): Bitmap = accessibility().capture().getOrElse {
         throw PhoneException.Failed(it.message ?: "No screenshot.")
