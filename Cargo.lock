@@ -237,7 +237,6 @@ dependencies = [
  "open",
  "serde",
  "serde_json",
- "sha2",
  "tokio",
  "tokio-tungstenite 0.30.0",
 ]
@@ -268,6 +267,8 @@ version = "0.5.0"
 dependencies = [
  "assist-actions",
  "assist-core",
+ "assist-voice",
+ "sherpa-onnx",
  "thiserror 2.0.21",
  "tokio",
  "toml",
@@ -306,8 +307,11 @@ name = "assist-voice"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "bzip2 0.6.1",
  "cpal",
+ "sha2",
  "sherpa-onnx",
+ "tar",
  "thiserror 2.0.21",
  "windows",
 ]

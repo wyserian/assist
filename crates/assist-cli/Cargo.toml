@@ -15,7 +15,7 @@ path = "src/main.rs"
 [features]
 default = ["voice"]
 # assist listen: microphone, speech to text, spoken replies.
-voice = ["dep:assist-voice", "dep:sha2", "assist-actions/transcribe"]
+voice = ["dep:assist-voice", "assist-actions/transcribe"]
 
 [dependencies]
 anyhow.workspace = true
@@ -34,7 +34,6 @@ keyring.workspace = true
 open.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2 = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite.workspace = true
 

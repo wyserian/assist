@@ -5,10 +5,12 @@
 //! Audio never reaches the async runtime: [`Mic`] reads on its own thread and hands out
 //! 16 kHz mono chunks; [`Segmenter`] turns them into [`Event`]s on the caller's thread.
 
+#[cfg(not(target_os = "android"))]
 mod capture;
 mod file;
+mod models;
 mod segment;
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "android")))]
 #[path = "speak_unix.rs"]
 mod speak;
 #[cfg(windows)]
@@ -21,9 +23,12 @@ mod wake;
 
 use std::path::PathBuf;
 
+#[cfg(not(target_os = "android"))]
 pub use capture::{input_devices, Mic};
 pub use file::{read_wav, transcribe, MAX_FILE_SECONDS};
+pub use models::{missing, Model, MODELS};
 pub use segment::{Event, Segmenter, PRE_ROLL};
+#[cfg(not(target_os = "android"))]
 pub use speak::Speaker;
 pub use speaker::{SpeakerModel, Voiceprint};
 pub use stt::{Recognizer, Transcript};

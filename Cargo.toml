@@ -38,6 +38,9 @@ serde_json = "1"
 sherpa-onnx = "2.0.3"
 sha2 = "0.11"
 strsim = "0.11"
+# Unpacks voice model archives; pure-Rust bzip2 by default.
+bzip2 = "0.6"
+tar = { version = "0.4", default-features = false }
 sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 thiserror = "2"
 tokio = "1"

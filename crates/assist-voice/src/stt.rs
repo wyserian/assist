@@ -2,6 +2,7 @@
 //! the utterance ends.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use sherpa_onnx as so;
 
@@ -14,9 +15,10 @@ const THREADS: i32 = 2;
 /// Costs compute only; nothing waits for it.
 static FLUSH: [f32; 32_000] = [0.0; 32_000];
 
-/// A streaming transducer model, loaded once and kept warm.
+/// A streaming transducer model, loaded once and kept warm. Transcripts share it, so one can
+/// be kept next to the recognizer (as the Android listener does).
 pub struct Recognizer {
-    inner: so::OnlineRecognizer,
+    inner: Arc<so::OnlineRecognizer>,
 }
 
 impl Recognizer {
@@ -43,13 +45,15 @@ impl Recognizer {
         config.max_active_paths = 4;
         let inner =
             so::OnlineRecognizer::create(&config).ok_or(VoiceError::Engine("speech recognizer"))?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Starts transcribing one utterance.
-    pub fn start(&self) -> Transcript<'_> {
+    pub fn start(&self) -> Transcript {
         Transcript {
-            recognizer: &self.inner,
+            recognizer: Arc::clone(&self.inner),
             stream: self.inner.create_stream(),
         }
     }
@@ -58,12 +62,12 @@ impl Recognizer {
 /// One utterance being transcribed. Feed it [`crate::Event::Audio`] samples, then call
 /// [`Transcript::finish`] on [`crate::Event::End`]. Runs on the caller's thread, never on the
 /// async runtime.
-pub struct Transcript<'a> {
-    recognizer: &'a so::OnlineRecognizer,
+pub struct Transcript {
+    recognizer: Arc<so::OnlineRecognizer>,
     stream: so::OnlineStream,
 }
 
-impl Transcript<'_> {
+impl Transcript {
     /// Decodes 16 kHz mono samples as far as they allow.
     pub fn feed(&mut self, samples: &[f32]) {
         self.stream.accept_waveform(RATE as i32, samples);
