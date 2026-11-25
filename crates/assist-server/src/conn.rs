@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::Instant;
 
 use assist_core::action::Chunk;
@@ -204,8 +204,18 @@ impl Conn {
 
     fn hello(&mut self, message: &Envelope, hello: Hello) -> Envelope {
         self.state.name_client(self.id, &hello.client);
-        if matches!(self.credential, Credential::Node { .. }) && !hello.contacts.is_empty() {
-            self.learn_contacts(hello.contacts);
+        if let Credential::Node { id, .. } = &self.credential {
+            if let (Some(push), Some(nodes)) = (&hello.push, self.state.services.nodes.as_ref()) {
+                if nodes.devices.set_push(id, push) {
+                    let mut peers = nodes.peers.lock().unwrap_or_else(PoisonError::into_inner);
+                    if let Err(err) = peers.set_push(id, push) {
+                        println!("Could not save a device's push address: {err}");
+                    }
+                }
+            }
+            if !hello.contacts.is_empty() {
+                self.learn_contacts(hello.contacts);
+            }
         }
         if let Some(cwd) = hello.cwd.map(PathBuf::from).filter(|p| p.is_dir()) {
             self.cwd = cwd;
@@ -221,6 +231,7 @@ impl Conn {
             cwd: None,
             voice: false,
             contacts: Vec::new(),
+            push: None,
         };
         message.answer(Kind::Hello, HUB, ours)
     }

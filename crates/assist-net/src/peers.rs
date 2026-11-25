@@ -28,6 +28,9 @@ pub struct Peer {
     pub capabilities: Vec<String>,
     /// When it was paired, Unix ms.
     pub added: u64,
+    /// Its push address, for waking it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push: Option<String>,
 }
 
 /// The hub's paired devices.
@@ -84,8 +87,20 @@ impl Peers {
                 .map(|c| bounded(&c))
                 .collect(),
             added: assist_proto::now_ms(),
+            push: None,
         });
         self.save()
+    }
+
+    /// Sets device `id`'s push address and saves the list when it changed.
+    pub fn set_push(&mut self, id: &str, push: &str) -> Result<(), NetError> {
+        match self.list.iter_mut().find(|peer| peer.id == id) {
+            Some(peer) if peer.push.as_deref() != Some(push) => {
+                peer.push = Some(push.to_owned());
+                self.save()
+            }
+            _ => Ok(()),
+        }
     }
 
     fn save(&self) -> Result<(), NetError> {
@@ -150,7 +165,14 @@ mod tests {
             .add(&phone, "Pixel", vec!["send_sms".to_owned()])
             .unwrap();
         peers.add(&phone, &"x".repeat(200), Vec::new()).unwrap();
+        peers
+            .set_push(&phone.to_string(), "https://ntfy.sh/up1")
+            .unwrap();
         let again = Peers::load(&dir).unwrap();
+        assert_eq!(
+            again.get(&phone).unwrap().push.as_deref(),
+            Some("https://ntfy.sh/up1")
+        );
         assert_eq!(again.all().len(), 1);
         assert_eq!(again.get(&phone).unwrap().name.len(), MAX_NAME);
         assert!(again.get(&SecretKey::generate().public()).is_none());

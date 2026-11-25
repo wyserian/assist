@@ -47,6 +47,7 @@ dependencies {
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)
     implementation(libs.zxing.core)
+    implementation(libs.unifiedpush)
     // The UniFFI Kotlin bindings call the Rust core through JNA.
     implementation("${libs.jna.get()}@aar")
 }

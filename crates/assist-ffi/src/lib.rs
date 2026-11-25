@@ -273,6 +273,14 @@ impl Assistant {
             .map_err(AssistError::Link)
     }
 
+    /// Remembers this phone's push address (UnifiedPush; empty forgets it) and reconnects,
+    /// so the computer can wake the phone when a request waits for it.
+    pub fn set_push(&self, url: String) -> Result<(), AssistError> {
+        self.runtime
+            .block_on(async { self.link.lock().await.set_push(&self.home, &url) })
+            .map_err(AssistError::Link)
+    }
+
     /// Says `text` to the paired computer's assistant, as its owner; its jobs' output comes
     /// later through the phone's `show`.
     pub fn say_remote(&self, text: String) -> Result<Answer, AssistError> {

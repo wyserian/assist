@@ -85,15 +85,13 @@ async fn handle(state: AppState, connection: Connection) {
                 connection,
             };
             let (outbox, queued) = mpsc::channel(READ_AHEAD);
-            nodes
-                .devices
-                .connect(&peer.id, &peer.name, peer.capabilities.clone(), outbox);
+            let token = nodes.devices.connect(&peer, outbox);
             let credential = Credential::Node {
                 name: peer.name,
                 id: peer.id.clone(),
             };
             conn::run(state.clone(), transport, credential, Some(queued)).await;
-            nodes.devices.disconnect(&peer.id);
+            nodes.devices.disconnect(&peer.id, token);
         }
         None => {
             let first = tokio::time::timeout(PAIR_WAIT, assist_net::recv_frame(&mut recv)).await;
@@ -138,11 +136,12 @@ fn pair(nodes: &Nodes, remote: &assist_net::EndpointId, text: &str) -> Envelope 
             "the pairing code is wrong or expired; make a new one",
         );
     }
-    let added = nodes
-        .peers
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .add(remote, &request.name, request.capabilities);
+    let mut peers = nodes.peers.lock().unwrap_or_else(PoisonError::into_inner);
+    let added = peers.add(remote, &request.name, request.capabilities);
+    if let Some(peer) = peers.get(remote) {
+        nodes.devices.know(peer);
+    }
+    drop(peers);
     match added {
         Ok(()) => {
             println!(

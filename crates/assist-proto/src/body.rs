@@ -23,6 +23,10 @@ pub struct Hello {
     /// on the phone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contacts: Vec<String>,
+    /// A paired phone's push address (UnifiedPush): the hub POSTs there to wake the phone
+    /// when a request waits for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push: Option<String>,
 }
 
 /// [`crate::Kind::Pair`]: a new device asks to be paired. Sent over an authenticated

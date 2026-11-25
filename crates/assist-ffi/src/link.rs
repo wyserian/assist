@@ -23,6 +23,10 @@ use crate::phone::Phone;
 const ANSWER_WAIT: Duration = Duration::from_secs(30);
 /// Messages queued each way.
 const QUEUE: usize = 16;
+/// This phone's push address, given to the computer.
+const PUSH_FILE: &str = "push.txt";
+/// Longest push address kept.
+const MAX_PUSH: usize = 1024;
 
 /// Why the link failed, for the user.
 pub(crate) type LinkResult<T> = Result<T, String>;
@@ -136,6 +140,25 @@ impl Link {
         result
     }
 
+    /// Remembers this phone's push address; the next connection tells the computer.
+    pub(crate) fn set_push(&mut self, home: &Path, url: &str) -> LinkResult<()> {
+        let url = url.trim();
+        if push(home).as_deref().unwrap_or_default() == url {
+            return Ok(());
+        }
+        let path = home.join(PUSH_FILE);
+        let saved = if url.is_empty() {
+            std::fs::remove_file(&path)
+        } else if url.len() > MAX_PUSH {
+            return Err("the push address is too long".to_owned());
+        } else {
+            assist_core::private_fs::write_atomic(&path, url.as_bytes())
+        };
+        saved.map_err(|err| err.to_string())?;
+        self.drop_session();
+        Ok(())
+    }
+
     fn drop_session(&mut self) {
         if let Some(session) = self.session.take() {
             session.connection.close(0u32.into(), b"bye");
@@ -170,6 +193,7 @@ impl Link {
             cwd: None,
             voice: false,
             contacts: side.contacts.clone(),
+            push: push(home),
         };
         let message = Envelope::new(Kind::Hello, "phone", "hub", hello);
         assist_net::send_frame(&mut send, &message.encode())
@@ -279,6 +303,12 @@ fn refusal(answer: &Envelope) -> String {
         .ok()
         .and_then(|result| result.error)
         .map_or_else(|| "the computer refused".to_owned(), |error| error.message)
+}
+
+/// This phone's push address, if it has one.
+fn push(home: &Path) -> Option<String> {
+    let url = std::fs::read_to_string(home.join(PUSH_FILE)).ok()?;
+    Some(url.trim().to_owned()).filter(|url| !url.is_empty())
 }
 
 /// The computer this phone is paired with, if any.

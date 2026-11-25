@@ -65,6 +65,18 @@
             android:name=".RecordService"
             android:exported="false"
             android:foregroundServiceType="microphone|mediaProjection" />
+        <!-- Wake-ups from the computer through the push distributor (the ntfy app). -->
+        <service
+            android:name=".PushWake"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".LinkService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
         <service
             android:name=".HandsFreeService"
             android:exported="false"

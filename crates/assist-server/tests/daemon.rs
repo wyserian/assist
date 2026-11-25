@@ -303,6 +303,7 @@ async fn notices_reach_only_subscribed_clients() {
         cwd: None,
         voice: false,
         contacts: Vec::new(),
+        push: None,
     };
     let mut listening = connect(daemon.port, &bearer(&daemon)).await.unwrap();
     let mut other = connect(daemon.port, &bearer(&daemon)).await.unwrap();
@@ -344,6 +345,7 @@ async fn token_client_runs_and_inspects_jobs() {
             cwd: None,
             voice: false,
             contacts: Vec::new(),
+            push: None,
         },
     )
     .await;
@@ -421,6 +423,7 @@ async fn voice_client_gets_voice_trust() {
         cwd: None,
         voice: true,
         contacts: Vec::new(),
+        push: None,
     };
     send(&mut ws, Kind::Hello, hello).await;
     recv(&mut ws).await.unwrap();
@@ -783,12 +786,44 @@ async fn device_says(
 }
 
 fn pair_request(secret: &str) -> Envelope {
+    pair_as(secret, "Test phone", &["call", "send_sms"])
+}
+
+fn pair_as(secret: &str, name: &str, capabilities: &[&str]) -> Envelope {
     let pair = assist_proto::Pair {
         secret: secret.to_owned(),
-        name: "Test phone".to_owned(),
-        capabilities: vec!["call".to_owned(), "send_sms".to_owned()],
+        name: name.to_owned(),
+        capabilities: capabilities.iter().map(|c| (*c).to_owned()).collect(),
     };
     Envelope::new(Kind::Pair, "phone", "hub", pair)
+}
+
+/// Pairs `device` as `name` with a fresh code from the CLI.
+async fn pair_device(
+    cli: &mut Ws,
+    device: &iroh::Endpoint,
+    hub: &iroh::EndpointAddr,
+    name: &str,
+    capabilities: &[&str],
+) {
+    let code: String = call(cli, rpc::PAIR_START, ()).await;
+    let ticket = assist_net::Ticket::parse(&code).unwrap();
+    let request = pair_as(&ticket.secret, name, capabilities);
+    let (_, _, paired) = device_says(device, hub, request).await;
+    assert_eq!(paired.kind, Kind::Paired, "{paired:?}");
+}
+
+/// A phone's hello with its contact names.
+fn phone_hello(contacts: &[&str]) -> Envelope {
+    let hello = Hello {
+        client: "assist-android".to_owned(),
+        version: "test".to_owned(),
+        cwd: None,
+        voice: false,
+        contacts: contacts.iter().map(|c| (*c).to_owned()).collect(),
+        push: None,
+    };
+    Envelope::new(Kind::Hello, "phone", "hub", hello)
 }
 
 #[tokio::test]
@@ -851,6 +886,7 @@ async fn a_confirmed_call_runs_on_the_connected_phone() {
         cwd: None,
         voice: false,
         contacts: vec!["Mom".to_owned()],
+        push: None,
     };
     let (mut to_hub, mut from_hub, _) = device_says(
         &phone,
@@ -915,6 +951,66 @@ async fn recv_reply(ws: &mut Ws) -> Reply {
         let message = recv(ws).await.unwrap();
         if message.kind == Kind::Reply {
             return message.body().unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_call_for_an_away_phone_waits_until_it_connects() {
+    let daemon = start("queue").await;
+    let mut cli = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    // A tablet that cannot call is connected and shares contacts; the phone is away.
+    let (tablet, phone) = (local_endpoint().await, local_endpoint().await);
+    pair_device(&mut cli, &tablet, &daemon.hub, "Tablet", &[]).await;
+    pair_device(&mut cli, &phone, &daemon.hub, "Phone", &["call"]).await;
+    let _tablet = device_says(&tablet, &daemon.hub, phone_hello(&["Mom"])).await;
+
+    let utterance = |text: &str| Utterance {
+        text: text.to_owned(),
+        speaker_verified: false,
+    };
+    send(&mut cli, Kind::Utterance, utterance("call mom")).await;
+    let question: Reply = recv_reply(&mut cli).await;
+    assert_eq!(question.say, ["Call Mom?"], "{question:?}");
+    send(&mut cli, Kind::Utterance, utterance("yes")).await;
+    let started: Reply = recv_reply(&mut cli).await;
+    let job = started.jobs[0].id;
+    assert_eq!(
+        job_output(&mut cli, job).await,
+        "Waiting for Phone; open Assist on it."
+    );
+
+    // The phone comes online and gets the request.
+    let (mut to_hub, mut from_hub, _) = device_says(&phone, &daemon.hub, phone_hello(&[])).await;
+    let frame = tokio::time::timeout(
+        Duration::from_secs(10),
+        assist_net::recv_frame(&mut from_hub),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
+    let run: assist_proto::Run = Envelope::decode(&frame).unwrap().body().unwrap();
+    assert_eq!(run.command, "call");
+    let ran = assist_proto::Ran {
+        job: run.job,
+        lines: Vec::new(),
+        error: None,
+    };
+    let answer = Envelope::new(Kind::Ran, "phone", "hub", ran);
+    assist_net::send_frame(&mut to_hub, &answer.encode())
+        .await
+        .unwrap();
+    assert_eq!(job_output(&mut cli, job).await, "On Phone.");
+}
+
+/// The next line of output of job `job`.
+async fn job_output(ws: &mut Ws, job: u64) -> String {
+    loop {
+        if let Ok(JobUpdate::Output { id, text, .. }) = recv(ws).await.unwrap().body() {
+            if id == job {
+                return text;
+            }
         }
     }
 }

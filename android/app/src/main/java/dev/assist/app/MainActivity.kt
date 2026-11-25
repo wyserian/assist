@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -96,6 +97,10 @@ private fun Chat(model: Core) {
         for (ask in model.screenConsents) {
             capture.launch(context.getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent())
         }
+    }
+    val activity = LocalActivity.current
+    LaunchedEffect(model.computer) {
+        activity?.let { model.registerPush(it) }
     }
     LaunchedEffect(model.lines.size) {
         if (model.lines.isNotEmpty()) list.animateScrollToItem(model.lines.lastIndex)

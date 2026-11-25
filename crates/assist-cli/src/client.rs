@@ -65,6 +65,7 @@ impl Client {
             cwd,
             voice,
             contacts: Vec::new(),
+            push: None,
         };
         let sent = client.send(Kind::Hello, hello).await?;
         client.answer(sent).await?;

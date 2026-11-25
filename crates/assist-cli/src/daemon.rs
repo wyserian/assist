@@ -110,6 +110,9 @@ async fn start_nodes(data: &Path, devices: Arc<assist_server::Devices>) -> Optio
             return None;
         }
     };
+    for peer in peers.all() {
+        devices.know(peer);
+    }
     match assist_net::endpoint(data).await {
         Ok(endpoint) => Some(Nodes {
             endpoint,

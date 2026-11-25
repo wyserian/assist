@@ -1,6 +1,7 @@
 package dev.assist.app
 
 import android.Manifest
+import android.app.Activity
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
@@ -21,6 +22,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import org.unifiedpush.android.connector.UnifiedPush
 import uniffi.assist_ffi.AssistException
 import uniffi.assist_ffi.Assistant
 import uniffi.assist_ffi.Feature
@@ -103,6 +106,13 @@ class Core(private val app: Application) {
     private var recording: Task? = null
     private var downloading = false
 
+    /** Asks [keepLinked] to connect now rather than at its next check. */
+    private val wakeups = Channel<Unit>(Channel.CONFLATED)
+
+    /** This phone's push address, handed to the core once it runs; "" forgets it. */
+    private var push: String? = null
+    private var pushHinted = false
+
     /** What to start again once the microphone permission is granted. */
     private var afterMic: (() -> Unit)? = null
 
@@ -130,9 +140,52 @@ class Core(private val app: Application) {
                 if (core != null && computer != null) {
                     withContext(Dispatchers.IO) { runCatching { core.connectComputer() } }
                 }
-                delay(LINK_CHECK_MS)
+                withTimeoutOrNull(LINK_CHECK_MS) { wakeups.receive() }
             }
         }
+    }
+
+    /** Connects to the paired computer now: it woke this phone for a request. */
+    fun linkNow() {
+        wakeups.trySend(Unit)
+    }
+
+    /**
+     * Registers for wake-ups once paired, so the computer can reach the phone with the app
+     * closed. Needs a UnifiedPush distributor app (ntfy); without one the link works while
+     * the app runs.
+     */
+    fun registerPush(activity: Activity) {
+        if (computer == null) return
+        UnifiedPush.tryUseCurrentOrDefaultDistributor(activity) { found ->
+            if (found) {
+                UnifiedPush.register(app)
+            } else if (!pushHinted) {
+                pushHinted = true
+                scope.launch { show(false, "Install the ntfy app so the computer can reach this phone while Assist is closed.") }
+            }
+        }
+    }
+
+    /** The distributor gave this phone a push address ("" when it took it back). */
+    fun pushAddress(url: String) {
+        scope.launch {
+            push = url
+            sendPush()
+        }
+    }
+
+    /** Registering for wake-ups failed. */
+    fun pushFailed(reason: String) {
+        scope.launch { show(false, "Wake-ups from the computer are off: $reason.") }
+    }
+
+    /** Hands the push address to the core, which tells the computer on the next connection. */
+    private suspend fun sendPush() {
+        val core = assistant ?: return
+        val url = push ?: return
+        val saved = withContext(Dispatchers.IO) { runCatching { core.setPush(url) } }
+        if (saved.isSuccess) linkNow()
     }
 
     /** Called with the user's answer to a permission prompt. */
@@ -340,6 +393,8 @@ class Core(private val app: Application) {
                 assistant = it
                 computer = it.pairedComputer()
                 facts.replay()
+                sendPush()
+                linkNow()
             }
             opened.onFailure { err ->
                 if (err !is AssistException) throw err
