@@ -24,7 +24,7 @@ mod wake;
 
 use std::path::PathBuf;
 
-pub use attention::{Attention, Heard, AWAKE};
+pub use attention::{Attention, Heard};
 #[cfg(not(target_os = "android"))]
 pub use capture::{input_devices, Mic};
 pub use file::{read_wav, transcribe, MAX_FILE_SECONDS};

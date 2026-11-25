@@ -41,6 +41,7 @@ struct Setup {
     models: PathBuf,
     device: Option<String>,
     wake: Vec<String>,
+    awake: Duration,
     owner: Option<Voiceprint>,
 }
 
@@ -53,6 +54,7 @@ pub async fn run(paths: &Paths, device: Option<String>) -> Result<()> {
         models: crate::models::ensure(paths.data()).await?,
         device,
         wake: config.persona.wake_phrases(),
+        awake: config.voice.awake,
         owner: crate::enroll::load(paths.data())?,
     };
     let hint = setup.wake.first().cloned().unwrap_or_default();
@@ -155,7 +157,7 @@ fn voice_loop(
         Some(owner) => Some((SpeakerModel::new(&models.join(SPEAKER_MODEL))?, owner)),
         None => None,
     };
-    let mut attention = Attention::new(models, &setup.wake, check.is_some())?;
+    let mut attention = Attention::new(models, &setup.wake, setup.awake, check.is_some())?;
     let mut speaker = Speaker::new()?;
     let mic = Mic::open(setup.device.as_deref())?;
     if heard

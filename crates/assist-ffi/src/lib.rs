@@ -111,6 +111,7 @@ pub struct Assistant {
     home: PathBuf,
     facts: Facts,
     wake_phrases: Vec<String>,
+    awake_seconds: u32,
     woke: String,
 }
 
@@ -151,6 +152,7 @@ impl Assistant {
         let mut config = Config::from_toml(&config_toml).map_err(|e| failed(&e))?;
         add_phone_lists(&mut config, contacts, apps);
         let wake_phrases = config.persona.wake_phrases();
+        let awake_seconds = u32::try_from(config.voice.awake.as_secs()).unwrap_or(u32::MAX);
         let woke = Replies::new(&config).line(Line::Wake, &[]);
         let config = Arc::new(config);
         let home = PathBuf::from(data_dir);
@@ -192,6 +194,7 @@ impl Assistant {
             home,
             facts,
             wake_phrases,
+            awake_seconds,
             woke,
         }))
     }
@@ -224,6 +227,11 @@ impl Assistant {
     /// The wake phrases from `[persona]`, for the hands-free listener.
     pub fn wake_phrases(&self) -> Vec<String> {
         self.wake_phrases.clone()
+    }
+
+    /// How long requests need no wake word after the last one (`[voice] awake`).
+    pub fn awake_seconds(&self) -> u32 {
+        self.awake_seconds
     }
 
     /// What to say when the wake word comes alone ("Yes, Prime?").

@@ -215,6 +215,9 @@ pub struct VoiceConfig {
     /// How close (0 to 1) an utterance must be to the owner's voiceprint to count as the
     /// owner. Higher refuses others more surely and the owner more often.
     pub speaker_threshold: f32,
+    /// How long requests need no wake word after the last exchange.
+    #[serde(deserialize_with = "duration")]
+    pub awake: Duration,
 }
 
 impl Default for VoiceConfig {
@@ -223,6 +226,7 @@ impl Default for VoiceConfig {
         // 0.12 (PLAN.md section 13).
         Self {
             speaker_threshold: 0.35,
+            awake: Duration::from_secs(60),
         }
     }
 }
@@ -514,6 +518,11 @@ impl Config {
         if !(0.0..1.0).contains(&config.voice.speaker_threshold) {
             return Err(ConfigError::Invalid(
                 "[voice] speaker_threshold must be at least 0 and below 1".to_owned(),
+            ));
+        }
+        if !(Duration::from_secs(5)..=Duration::from_secs(3600)).contains(&config.voice.awake) {
+            return Err(ConfigError::Invalid(
+                "[voice] awake must be between 5s and 1h".to_owned(),
             ));
         }
         if !config.server.bind.ip().is_loopback() {

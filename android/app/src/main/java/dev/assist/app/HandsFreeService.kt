@@ -56,7 +56,7 @@ class HandsFreeService : Service() {
                 delay(200)
                 wake = core.wakePhrases()
             }
-            val ears = withContext(Dispatchers.IO) { HandsFree(filesDir.absolutePath, wake) }
+            val ears = withContext(Dispatchers.IO) { HandsFree(filesDir.absolutePath, wake, core.awakeSeconds()) }
             withContext(Dispatchers.IO) {
                 record<Unit> { chunk ->
                     val heard = ears.push(chunk, core.speaking())

@@ -146,6 +146,9 @@ class Core(private val app: Application) {
     /** A reply is being spoken now. */
     fun speaking(): Boolean = speech.isSpeaking
 
+    /** How long requests need no wake word, for [HandsFreeService]. */
+    fun awakeSeconds(): UInt = assistant?.awakeSeconds() ?: DEFAULT_AWAKE_S
+
     /** The wake phrases for [HandsFreeService]; empty until the core has started. */
     fun wakePhrases(): List<String> = assistant?.wakePhrases().orEmpty()
 
@@ -333,6 +336,7 @@ class Core(private val app: Application) {
         const val MAX_NOTICES = 5
         const val MAX_CONFIG = 64 * 1024
         const val MAX_LINES = 200
+        const val DEFAULT_AWAKE_S = 60u
         const val POLL_MS = 200L
     }
 }

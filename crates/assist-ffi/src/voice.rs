@@ -116,10 +116,16 @@ pub struct HandsFree {
 #[uniffi::export]
 impl HandsFree {
     /// Loads the models from `data_dir` and listens for `wake` (see
-    /// `Assistant::wake_phrases`); slow, so not on the UI thread.
+    /// `Assistant::wake_phrases`), staying awake `awake_seconds` after each request (see
+    /// `Assistant::awake_seconds`); slow, so not on the UI thread.
     #[uniffi::constructor]
-    pub fn new(data_dir: String, wake: Vec<String>) -> Result<Arc<Self>, AssistError> {
-        let attention = Attention::new(&models_dir(Path::new(&data_dir)), &wake, false)
+    pub fn new(
+        data_dir: String,
+        wake: Vec<String>,
+        awake_seconds: u32,
+    ) -> Result<Arc<Self>, AssistError> {
+        let awake = std::time::Duration::from_secs(awake_seconds.into());
+        let attention = Attention::new(&models_dir(Path::new(&data_dir)), &wake, awake, false)
             .map_err(|err| AssistError::Voice(err.to_string()))?;
         Ok(Arc::new(Self {
             attention: Mutex::new(attention),

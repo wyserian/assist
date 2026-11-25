@@ -1,6 +1,6 @@
 //! Hands-free listening, shared by `assist listen` and the Android app: speech counts only
-//! after the wake word ("hey Bee") or within [`AWAKE`] of the last exchange, so answers to the
-//! assistant's questions need no wake word. While the assistant speaks only keywords are
+//! after the wake word ("hey Bee") or within the awake time (`[voice] awake`) of the last
+//! exchange, so follow-ups and answers to the assistant's questions need no wake word. While the assistant speaks only keywords are
 //! heard (half duplex), and the wake word or "stop" cuts the reply short.
 
 use std::path::Path;
@@ -10,10 +10,6 @@ use crate::{
     Event, Keyword, Recognizer, Segmenter, Silero, Spotter, Transcript, VadSettings, VoiceError,
     KWS_MODEL, RATE, STT_MODEL, VAD_MODEL,
 };
-
-/// How long the assistant keeps listening without the wake word after it was woken or last
-/// heard a request.
-pub const AWAKE: Duration = Duration::from_secs(8);
 
 /// What [`Attention::push`] reports.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,14 +34,22 @@ pub struct Attention {
     utterance: Vec<f32>,
     keep_audio: bool,
     awake_until: Option<Instant>,
+    /// How long it stays awake after the wake word or a request.
+    awake: Duration,
     /// The wake word was heard in the current utterance.
     woke: bool,
 }
 
 impl Attention {
     /// Loads the VAD, speech and keyword models from `models` and listens for `wake`
-    /// phrases. `keep_audio` hands each utterance's audio out with its text.
-    pub fn new(models: &Path, wake: &[String], keep_audio: bool) -> Result<Self, VoiceError> {
+    /// phrases, staying awake for `awake` after each. `keep_audio` hands each utterance's
+    /// audio out with its text.
+    pub fn new(
+        models: &Path,
+        wake: &[String],
+        awake: Duration,
+        keep_audio: bool,
+    ) -> Result<Self, VoiceError> {
         let settings = VadSettings::default();
         let vad = Silero::new(&models.join(VAD_MODEL), &settings)?;
         let capacity = if keep_audio { RATE as usize * 15 } else { 0 };
@@ -57,6 +61,7 @@ impl Attention {
             utterance: Vec::with_capacity(capacity),
             keep_audio,
             awake_until: None,
+            awake,
             woke: false,
         })
     }
@@ -76,13 +81,13 @@ impl Attention {
                 on(Heard::Interrupt);
             }
             if awake || keyword == Some(Keyword::Wake) {
-                self.awake_until = Some(now + AWAKE);
+                self.awake_until = Some(now + self.awake);
             }
             self.transcript = None;
             return;
         }
         if keyword == Some(Keyword::Wake) {
-            self.awake_until = Some(now + AWAKE);
+            self.awake_until = Some(now + self.awake);
             self.woke = true;
             // Recognition restarts after the wake word, so the text is the request alone.
             // shortcut: audio between the wake word's end and its detection is dropped, a
@@ -99,6 +104,7 @@ impl Attention {
             utterance,
             keep_audio,
             awake_until,
+            awake,
             woke,
             spotter: _,
         } = self;
@@ -122,7 +128,7 @@ impl Attention {
                     .unwrap_or_default();
                 let now = Instant::now();
                 if !text.is_empty() && awake_until.is_some_and(|until| until > now) {
-                    *awake_until = Some(now + AWAKE);
+                    *awake_until = Some(now + *awake);
                     on(Heard::Text(&text, utterance));
                 } else if *woke {
                     on(Heard::Woke);
