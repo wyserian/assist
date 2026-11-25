@@ -45,6 +45,8 @@ pub trait Phone: Send + Sync {
     ) -> Result<String, PhoneError>;
     /// Stops the recording and saves it; returns where it went.
     fn stop_recording(&self) -> Result<String, PhoneError>;
+    /// A proactive message ("battery is low"): spoken when `speak`, else a notification.
+    fn notice(&self, text: String, speak: bool) -> Result<(), PhoneError>;
 }
 
 /// What to record.

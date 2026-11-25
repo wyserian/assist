@@ -2,6 +2,9 @@ package dev.assist.app
 
 import android.Manifest
 import android.app.Application
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -24,6 +27,7 @@ import uniffi.assist_ffi.Job
 import uniffi.assist_ffi.Listener
 import uniffi.assist_ffi.ModelFile
 import uniffi.assist_ffi.missingModels
+import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Job as Task
 
@@ -77,7 +81,10 @@ class Core(private val app: Application) {
         ask = { permissions.trySend(it) },
         offer = ::offerModels,
         askScreen = { screenConsents.trySend(Unit) },
+        tell = { text, speak -> scope.launch { notice(text, speak) } },
     )
+    private val facts = PhoneFacts(app) { name, value -> assistant?.setFact(name, value) }
+    private var notices = 0
     private val speech = TextToSpeech(app) {}
     private var assistant: Assistant? = null
     private var listener: Listener? = null
@@ -95,6 +102,7 @@ class Core(private val app: Application) {
             show(false, "Allow contacts so I can call and text people by name.")
             permissions.trySend(CONTACTS)
         }
+        facts.start()
         start()
     }
 
@@ -253,10 +261,13 @@ class Core(private val app: Application) {
             val opened = withContext(Dispatchers.IO) {
                 old?.close()
                 runCatching {
-                    Assistant("", dataDir(), PhoneLists.contacts(app), PhoneLists.apps(app), phone)
+                    Assistant(config(), dataDir(), PhoneLists.contacts(app), PhoneLists.apps(app), phone)
                 }
             }
-            opened.onSuccess { assistant = it }
+            opened.onSuccess {
+                assistant = it
+                facts.replay()
+            }
             opened.onFailure { err ->
                 if (err !is AssistException) throw err
                 show(false, "Cannot start: ${err.message}")
@@ -277,6 +288,32 @@ class Core(private val app: Application) {
         }
     }
 
+    /** A proactive message: shown in the chat, then spoken or posted as a notification. */
+    private fun notice(text: String, speak: Boolean) {
+        show(false, text)
+        if (speak) {
+            speak(listOf(text))
+            return
+        }
+        val manager = app.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(NOTICES, "Messages", NotificationManager.IMPORTANCE_DEFAULT))
+        val shown = Notification.Builder(app, NOTICES)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Assist")
+            .setContentText(text)
+            .build()
+        // Notices replace each other after a few, so they cannot pile up.
+        manager.notify(NOTICE_BASE + notices++ % MAX_NOTICES, shown)
+    }
+
+    /** The owner's `config.toml` in the app's files (same format as the desktop), if any. */
+    private fun config(): String {
+        val file = File(app.filesDir, "config.toml")
+        if (!file.isFile) return ""
+        if (file.length() > MAX_CONFIG) throw AssistException.Start("config.toml is larger than $MAX_CONFIG bytes")
+        return runCatching { file.readText() }.getOrElse { throw AssistException.Start("cannot read config.toml: ${it.message}") }
+    }
+
     private fun show(fromUser: Boolean, text: String) {
         lines.add(Line(fromUser, text))
         if (lines.size > MAX_LINES) lines.removeRange(0, lines.size - MAX_LINES)
@@ -291,6 +328,10 @@ class Core(private val app: Application) {
         const val CONTACTS = Manifest.permission.READ_CONTACTS
         const val MIC = Manifest.permission.RECORD_AUDIO
         const val NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS"
+        const val NOTICES = "notices"
+        const val NOTICE_BASE = 100
+        const val MAX_NOTICES = 5
+        const val MAX_CONFIG = 64 * 1024
         const val MAX_LINES = 200
         const val POLL_MS = 200L
     }

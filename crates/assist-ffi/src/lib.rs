@@ -13,9 +13,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use assist_core::assistant::{assemble, Host};
-use assist_core::config::Config;
+use assist_core::config::{Config, Sink};
 use assist_core::dialog::{Dialog, LiveEngine};
+use assist_core::facts::{Facts, Value};
 use assist_core::policy::Principal;
+use assist_core::proactive;
 use assist_core::replies::{Line, Replies};
 use assist_core::scheduler::Scheduler;
 use assist_core::store::Store;
@@ -26,6 +28,24 @@ uniffi::setup_scaffolding!();
 
 /// Threads for jobs; a phone runs few at a time.
 const WORKERS: usize = 2;
+
+/// The facts the app may set (PLAN.md section 3.10); others are refused.
+const PHONE_FACTS: [&str; 3] = ["node.battery", "node.charging", "screen.locked"];
+
+/// A fact's value, as the app reports it.
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+pub enum FactValue {
+    /// Yes or no, e.g. `node.charging`.
+    Bool {
+        /// The value.
+        value: bool,
+    },
+    /// A number, e.g. `node.battery` in percent.
+    Number {
+        /// The value.
+        value: f64,
+    },
+}
 
 /// Most contacts and apps taken from the phone, and the longest name kept.
 const MAX_ENTRIES: usize = 5000;
@@ -93,6 +113,7 @@ pub struct Assistant {
     /// The wake word: whoever speaks near the phone (voice trust, PLAN.md section 3.6).
     spoken: Conversation,
     home: PathBuf,
+    facts: Facts,
     wake_phrases: Vec<String>,
     woke: String,
 }
@@ -139,14 +160,31 @@ impl Assistant {
         let home = PathBuf::from(data_dir);
         let mut actions = assist_actions::builtin();
         actions.extend(phone::all(&phone));
+        let facts = Facts::default();
         let host = Host {
             actions,
+            facts: facts.clone(),
             ..Host::default()
         };
-        // The scheduler spawns its tasks on the runtime it is built in.
+        // The scheduler and the rules spawn their tasks on the runtime they are built in.
         let parts = {
             let _inside = runtime.enter();
-            assemble(config, &home, host).map_err(|e| failed(&e))?
+            let parts = assemble(Arc::clone(&config), &home, host).map_err(|e| failed(&e))?;
+            proactive::spawn(
+                &config,
+                parts.scheduler.clone(),
+                facts.clone(),
+                home.clone(),
+                move |notice| {
+                    let phone = Arc::clone(&phone);
+                    let speak = notice.sink == Sink::Speak;
+                    // The app posts it; keep the runtime's threads free meanwhile.
+                    drop(tokio::task::spawn_blocking(move || {
+                        phone.notice(notice.text, speak)
+                    }));
+                },
+            );
+            parts
         };
         Ok(Arc::new(Self {
             typed: Conversation::new(&parts.engine, Principal::local("android")),
@@ -156,6 +194,7 @@ impl Assistant {
             engine: parts.engine,
             store: parts.store,
             home,
+            facts,
             wake_phrases,
             woke,
         }))
@@ -170,6 +209,20 @@ impl Assistant {
     /// behind it, such as a tap on Yes on screen; a spoken "yes" alone does not confirm.
     pub fn hear(&self, text: String, vouched: bool) -> Answer {
         self.converse(&self.spoken, &text, vouched)
+    }
+
+    /// Sets a phone fact such as `node.battery`; false for a name the app may not set.
+    pub fn set_fact(&self, name: String, value: FactValue) -> bool {
+        if !PHONE_FACTS.contains(&name.as_str()) {
+            return false;
+        }
+        let value = match value {
+            FactValue::Bool { value } => Value::Bool(value),
+            FactValue::Number { value } if value.is_finite() => Value::Number(value),
+            FactValue::Number { .. } => return false,
+        };
+        self.facts.set(&name, value);
+        true
     }
 
     /// The wake phrases from `[persona]`, for the hands-free listener.
@@ -334,6 +387,9 @@ mod tests {
             self.log("stop recording".to_owned())?;
             Ok("Music/Assist/saved".to_owned())
         }
+        fn notice(&self, text: String, speak: bool) -> Result<(), PhoneError> {
+            self.log(format!("notice {speak} {text}"))
+        }
     }
 
     /// An assistant in a fresh data directory; remove it with [`finish`].
@@ -479,6 +535,34 @@ mod tests {
         assert_eq!(log[1], "stop recording");
         assert_eq!(log[2], "record Screen demo.mp4");
         assert_eq!(log[3], "stop recording");
+        finish(assistant, dir);
+    }
+
+    #[test]
+    fn a_low_battery_rule_speaks_on_the_phone() {
+        let phone = Arc::new(FakePhone::default());
+        let dir = std::env::temp_dir().join(format!("assist-ffi-facts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let config = "[[proactive.rules]]\nname = \"battery\"\non = \"node.battery < 20 and not node.charging\"\nsay = \"Battery is low.\"\n";
+        let assistant = Assistant::new(
+            config.to_owned(),
+            dir.display().to_string(),
+            Vec::new(),
+            Vec::new(),
+            Arc::clone(&phone) as Arc<dyn Phone>,
+        )
+        .unwrap();
+        assert!(!assistant.set_fact("app.focused".to_owned(), FactValue::Bool { value: true }));
+        assert!(assistant.set_fact("node.charging".to_owned(), FactValue::Bool { value: false }));
+        assert!(assistant.set_fact("node.battery".to_owned(), FactValue::Number { value: 12.0 }));
+        // The rules check facts when they start and then every 15 s.
+        for _ in 0..400 {
+            if !phone.0.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(*phone.0.lock().unwrap(), ["notice true Battery is low."]);
         finish(assistant, dir);
     }
 
