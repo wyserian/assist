@@ -3,6 +3,6 @@ source: crates/assist-core/src/dialog.rs
 expression: "transcript(engine(false, commands()), &[\"make me a sandwich\", \"$\"])"
 ---
 > make me a sandwich
-< Sorry Prime, please say that again.
+< Sorry, please say that again.
 > $
 < Type a command after $.

@@ -103,4 +103,4 @@ speaker_threshold = 0.35
 
 # Reword any reply; keys and defaults are in config/phrases/en/replies.toml.
 [replies]
-not_understood = "Sorry {address}, please say that again."
+cancelled = "Stopped, {address}."

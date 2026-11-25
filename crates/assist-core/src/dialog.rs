@@ -1439,7 +1439,7 @@ alert = { run = "run build | save errors.txt" }
         let refused = dialog.handle(&owner, "yes", now);
         assert_eq!(
             refused.say,
-            ["Sorry Prime, I don't recognise your voice. Confirm on screen."]
+            ["Sorry, I don't recognise your voice. Confirm on screen."]
         );
         assert!(refused.run.is_empty());
         assert!(dialog.is_waiting());

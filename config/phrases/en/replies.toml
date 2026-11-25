@@ -1,11 +1,11 @@
 # What the assistant says. {name} and {address} come from [persona] in config.toml; when a
-# value is empty, the space or comma before it goes too ("Sorry, please say that again.").
+# value is empty, the space or comma before it goes too ("Hello." for "Hello {address}.").
 # Override any line in config.toml under [replies]. What a command says when it starts or
 # asks to confirm is in its phrase file (`reply`, `confirm`).
 
-greeting = "Hello {address}. {name} is listening."
+greeting = "Hello {address}."
 wake = "Yes, {address}?"
-not_understood = "Sorry {address}, please say that again."
+not_understood = "Sorry, please say that again."
 offer_shell = "I don't know that command. Run \"{text}\" in the shell?"
 expired = "That question expired."
 cancelled = "Cancelled."
@@ -19,7 +19,7 @@ say_number = "Please say a number."
 unknown_choice = "I don't know \"{text}\". Try again, or say cancel."
 declined = "Okay, I won't."
 yes_or_no = "Please answer yes or no."
-unknown_voice = "Sorry {address}, I don't recognise your voice. Confirm on screen."
+unknown_voice = "Sorry, I don't recognise your voice. Confirm on screen."
 unclear_correction = "I couldn't tell what \"{text}\" should replace."
 did_you_mean = "Did you mean {options}?"
 bad_stage = "I can't use \"{text}\" in a pipe."

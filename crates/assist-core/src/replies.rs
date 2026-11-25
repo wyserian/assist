@@ -237,10 +237,8 @@ mod tests {
         )
         .unwrap();
         let replies = Replies::new(&config);
-        assert_eq!(
-            replies.line(Line::Greeting, &[]),
-            "Hello Prime. Bee is listening."
-        );
+        assert_eq!(replies.line(Line::Greeting, &[]), "Hello Prime.");
+        assert_eq!(replies.fill("{name} is here.", &[]), "Bee is here.");
         assert_eq!(replies.line(Line::Cancelled, &[]), "Stopped, Prime.");
         assert_eq!(
             replies.fill("Opening {app}.", &[("app", "firefox")]),
@@ -253,13 +251,10 @@ mod tests {
         let config = Config::from_toml("[persona]\naddress = \"\"\n").unwrap();
         let replies = Replies::new(&config);
         assert_eq!(
-            replies.line(Line::NotUnderstood, &[]),
-            "Sorry, please say that again."
+            replies.fill("Sorry {address}, again.", &[]),
+            "Sorry, again."
         );
-        assert_eq!(
-            replies.line(Line::Greeting, &[]),
-            "Hello. Bee is listening."
-        );
+        assert_eq!(replies.line(Line::Greeting, &[]), "Hello.");
         assert_eq!(replies.fill("Done, {address}.", &[]), "Done.");
     }
 
