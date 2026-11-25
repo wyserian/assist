@@ -73,6 +73,12 @@ Saving writes `config.toml` and keeps its comments and layout.
 The audit log: time, event, job, source and action of everything that ran or was refused.
 **Refresh** reloads it. The full log is in `audit/` in the data directory.
 
+### Nodes
+
+Paired devices: state (connected, away, or away but can be woken by push), requests running
+on them or waiting for them, what they can do, when they were paired and last seen.
+**Remove** unpairs a device and drops its connection. See [devices.md](devices.md).
+
 ### Clients
 
 Connected clients: id, kind (`cli` for token clients such as `assist run` and

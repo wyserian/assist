@@ -12,8 +12,10 @@ use std::time::{Duration, Instant};
 
 use assist_core::action::{Action, ActionError, BoxFuture, Chunk, Input, JobCtx, Manifest, Output};
 use assist_net::Peer;
+use assist_proto::rpc::NodeEntry;
 use assist_proto::{Envelope, Kind, Ran, Run};
 use tokio::sync::{mpsc, oneshot, Notify};
+use tokio_util::sync::CancellationToken;
 
 use crate::conn::HUB;
 
@@ -38,9 +40,15 @@ pub struct Devices {
 struct Device {
     name: String,
     capabilities: Vec<String>,
+    /// When it was paired, Unix ms.
+    added: u64,
+    /// When it last connected or disconnected, Unix ms.
+    seen: Option<u64>,
     /// Its UnifiedPush address: a POST there wakes it.
     push: Option<String>,
     woken: Option<Instant>,
+    /// Requests waiting for it to connect.
+    queued: usize,
     link: Option<Link>,
 }
 
@@ -50,6 +58,8 @@ struct Link {
     token: u64,
     outbox: mpsc::Sender<Envelope>,
     waiting: HashMap<u64, oneshot::Sender<Ran>>,
+    /// Cancelled to drop the connection when the device is removed.
+    kick: CancellationToken,
 }
 
 /// Where a request can go now.
@@ -60,6 +70,7 @@ enum Pick {
         result: oneshot::Receiver<Ran>,
     },
     Away {
+        id: String,
         name: String,
         /// The address to wake it through, when it is due a wake.
         wake: Option<String>,
@@ -77,29 +88,40 @@ impl Devices {
         let device = paired.entry(peer.id.clone()).or_insert_with(|| Device {
             name: String::new(),
             capabilities: Vec::new(),
+            added: peer.added,
+            seen: None,
             push: None,
             woken: None,
+            queued: 0,
             link: None,
         });
         device.name.clone_from(&peer.name);
+        device.added = peer.added;
         device.capabilities.clone_from(&peer.capabilities);
         device.push = peer.push.clone().filter(|url| valid_push(url));
     }
 
     /// Device `peer` connected; messages for it go to `outbox`. Returns the connection's
-    /// token for [`Devices::disconnect`].
-    pub(crate) fn connect(&self, peer: &Peer, outbox: mpsc::Sender<Envelope>) -> u64 {
+    /// token for [`Devices::disconnect`] and a token cancelled when the device is removed.
+    pub(crate) fn connect(
+        &self,
+        peer: &Peer,
+        outbox: mpsc::Sender<Envelope>,
+    ) -> (u64, CancellationToken) {
         self.know(peer);
         let token = self.next.fetch_add(1, Ordering::Relaxed);
+        let kick = CancellationToken::new();
         if let Some(device) = self.lock().get_mut(&peer.id) {
+            device.seen = Some(assist_proto::now_ms());
             device.link = Some(Link {
                 token,
                 outbox,
                 waiting: HashMap::new(),
+                kick: kick.clone(),
             });
         }
         self.arrived.notify_waiters();
-        token
+        (token, kick)
     }
 
     /// Connection `token` of device `id` went away; requests waiting on it fail.
@@ -107,7 +129,47 @@ impl Devices {
         if let Some(device) = self.lock().get_mut(id) {
             if device.link.as_ref().is_some_and(|link| link.token == token) {
                 device.link = None;
+                device.seen = Some(assist_proto::now_ms());
             }
+        }
+    }
+
+    /// Forgets device `id` and drops its connection; requests on it fail.
+    pub(crate) fn forget(&self, id: &str) {
+        if let Some(link) = self.lock().remove(id).and_then(|device| device.link) {
+            link.kick.cancel();
+        }
+    }
+
+    /// The paired devices for the Nodes tab, by name.
+    pub(crate) fn list(&self) -> Vec<NodeEntry> {
+        let mut nodes: Vec<NodeEntry> = self
+            .lock()
+            .iter()
+            .map(|(id, device)| NodeEntry {
+                id: id.clone(),
+                name: device.name.clone(),
+                capabilities: device.capabilities.clone(),
+                added: device.added,
+                connected: device.link.is_some(),
+                seen: device.seen,
+                push: device.push.is_some(),
+                queued: device.queued,
+                running: device.link.as_ref().map_or(0, |link| link.waiting.len()),
+            })
+            .collect();
+        nodes.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+        nodes
+    }
+
+    /// Counts a request waiting for device `id`, until the returned guard drops.
+    fn queue(&self, id: &str) -> Queued<'_> {
+        if let Some(device) = self.lock().get_mut(id) {
+            device.queued += 1;
+        }
+        Queued {
+            devices: self,
+            id: id.to_owned(),
         }
     }
 
@@ -136,15 +198,15 @@ impl Devices {
     /// that can, due a wake at most every [`WAKE_EVERY`].
     fn pick(&self, command: &str, job: u64) -> Result<Pick, String> {
         let mut paired = self.lock();
-        let mut able: Vec<&mut Device> = paired
-            .values_mut()
-            .filter(|device| device.capabilities.iter().any(|c| c == command))
+        let mut able: Vec<(&String, &mut Device)> = paired
+            .iter_mut()
+            .filter(|(_, device)| device.capabilities.iter().any(|c| c == command))
             .collect();
         let at = able
             .iter()
-            .position(|device| device.link.is_some())
+            .position(|(_, device)| device.link.is_some())
             .unwrap_or(0);
-        let Some(device) = able.get_mut(at) else {
+        let Some((id, device)) = able.get_mut(at) else {
             return Err(format!(
                 "no paired device can {command}; pair the phone first"
             ));
@@ -156,7 +218,11 @@ impl Devices {
             if wake.is_some() {
                 device.woken = Some(Instant::now());
             }
-            return Ok(Pick::Away { name, wake });
+            return Ok(Pick::Away {
+                id: (*id).clone(),
+                name,
+                wake,
+            });
         };
         let (done, result) = oneshot::channel();
         link.waiting.insert(job, done);
@@ -178,6 +244,7 @@ impl Devices {
         let job = self.next.fetch_add(1, Ordering::Relaxed);
         let deadline = tokio::time::Instant::now() + QUEUE_WAIT;
         let mut told = false;
+        let mut queued: Option<Queued<'_>> = None;
         loop {
             // Registered before looking, so a device connecting in between is not missed.
             let arrived = self.arrived.notified();
@@ -188,8 +255,16 @@ impl Devices {
                     name,
                     outbox,
                     result,
-                } => return send(job, command, slots, name, outbox, result).await,
-                Pick::Away { name, wake } => (name, wake),
+                } => {
+                    drop(queued);
+                    return send(job, command, slots, name, outbox, result).await;
+                }
+                Pick::Away { id, name, wake } => {
+                    if queued.as_ref().is_none_or(|q| q.id != id) {
+                        queued = Some(self.queue(&id));
+                    }
+                    (name, wake)
+                }
             };
             if !told {
                 told = true;
@@ -210,6 +285,20 @@ impl Devices {
                     QUEUE_WAIT.as_secs() / 60
                 ));
             }
+        }
+    }
+}
+
+/// A request counted as waiting for a device; uncounted on drop.
+struct Queued<'a> {
+    devices: &'a Devices,
+    id: String,
+}
+
+impl Drop for Queued<'_> {
+    fn drop(&mut self) {
+        if let Some(device) = self.devices.lock().get_mut(&self.id) {
+            device.queued = device.queued.saturating_sub(1);
         }
     }
 }

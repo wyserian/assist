@@ -37,6 +37,7 @@ daemon and the commands that talk to it must use the same `--data-dir`.
 | [`secret`](#secret) | yes | List, set or delete secrets |
 | [`ui`](#ui) | yes | Open the dashboard, signed in |
 | [`pair`](#pair) | yes | Show a code to pair a phone |
+| [`nodes`](#nodes) | yes | List paired devices, or unpair one |
 | [`listen`](#listen) | yes | Talk to the daemon by voice |
 | [`enroll`](#enroll) | | Record your voiceprint |
 | [`install-autostart`](#install-autostart) | | Start the daemon at login |
@@ -248,6 +249,17 @@ assist pair
 Shows a QR code and its text (`assist-pair:...`) for the Assist phone app. The code works
 once, for 5 minutes. Only a CLI connection (with the token) can make codes. See
 [devices.md](devices.md).
+
+## nodes
+
+```sh
+assist nodes                    # list paired devices
+assist nodes remove <device>    # unpair one, by name or key; asks first
+```
+
+For each device: connected or away, whether it can be woken by push, requests running on it
+or waiting for it, what it can do and its key. Removing drops its connection at once; it must
+pair again to connect. See [devices.md](devices.md#seeing-your-devices).
 
 ## listen
 

@@ -52,7 +52,7 @@ features are being built (see [Status](#status)).
 - **Computer and phone together.** Pair the phone with a QR code. Say "call mom" on the
   computer and the phone makes the call. A phone that is away is woken by push.
 - **Dashboard.** A local web page with chat, jobs, pending confirmations, memory, autopilot,
-  secrets, commands, settings, audit log and connected clients.
+  secrets, commands, settings, audit log, paired devices and connected clients.
 
 ## Quick start: computer
 

@@ -13,8 +13,8 @@ use assist_core::scheduler::JobInfo;
 use assist_core::{autopilot, memory};
 use assist_proto::rpc::{
     self, AuditPage, AutopilotSet, ClientRef, CommandEntry, CommandSetting, DialogAnswer, Explain,
-    GoalStatus, History, JobRef, MemoryForget, Miss, MissText, Otp, PhraseAdd, SecretEntry,
-    SecretName, SecretSet, SettingChange, SettingResult, Settings,
+    GoalStatus, History, JobRef, MemoryForget, Miss, MissText, NodeRef, Otp, PhraseAdd,
+    SecretEntry, SecretName, SecretSet, SettingChange, SettingResult, Settings,
 };
 use assist_proto::{JobState, Rpc, RpcResult};
 use serde::de::DeserializeOwned;
@@ -397,6 +397,31 @@ async fn dispatch(conn: &mut Conn, method: &str, params: Value) -> Result<RpcRes
                 )
             })?;
             RpcResult::ok(nodes.pairing.start(nodes.endpoint.id()).encode())
+        }
+        rpc::NODES_LIST => RpcResult::ok(
+            services
+                .nodes
+                .as_ref()
+                .map(|nodes| nodes.devices.list())
+                .unwrap_or_default(),
+        ),
+        rpc::NODES_REMOVE => {
+            require_local(conn)?;
+            let node: NodeRef = parse(params)?;
+            let nodes = services.nodes.as_ref().ok_or_else(|| {
+                RpcResult::err(
+                    "unavailable",
+                    "the network did not start; see the daemon's output",
+                )
+            })?;
+            let removed = nodes
+                .peers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&node.id)
+                .map_err(|err| RpcResult::err("failed", err.to_string()))?;
+            nodes.devices.forget(&node.id);
+            RpcResult::ok(removed)
         }
         rpc::AUTH_OTP => {
             // Only the token holder can let a browser in.

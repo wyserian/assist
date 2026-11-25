@@ -94,6 +94,13 @@ enum Command {
         /// The goal for pause and resume.
         goal: Option<String>,
     },
+    /// List paired devices, or unpair one (`remove <device>`).
+    Nodes {
+        /// `remove`.
+        action: Option<String>,
+        /// The device's name or key.
+        target: Option<String>,
+    },
     /// List what the assistant remembers, or forget a record (`forget <id>` or `forget all`).
     Memory {
         /// `forget`.
@@ -166,6 +173,9 @@ fn main() -> Result<ExitCode> {
             Command::Facts => commands::facts(&paths).await?,
             Command::Autopilot { action, goal } => {
                 commands::autopilot(&paths, action.as_deref(), goal).await?;
+            }
+            Command::Nodes { action, target } => {
+                commands::nodes(&paths, action.as_deref(), target.as_deref()).await?;
             }
             Command::Memory { action, target } => {
                 commands::memory(&paths, action.as_deref(), target.as_deref()).await?;

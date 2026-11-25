@@ -92,6 +92,17 @@ impl Peers {
         self.save()
     }
 
+    /// Removes device `id` and saves the list; false if it was not paired.
+    pub fn remove(&mut self, id: &str) -> Result<bool, NetError> {
+        let before = self.list.len();
+        self.list.retain(|peer| peer.id != id);
+        if self.list.len() == before {
+            return Ok(false);
+        }
+        self.save()?;
+        Ok(true)
+    }
+
     /// Sets device `id`'s push address and saves the list when it changed.
     pub fn set_push(&mut self, id: &str, push: &str) -> Result<(), NetError> {
         match self.list.iter_mut().find(|peer| peer.id == id) {
@@ -173,9 +184,13 @@ mod tests {
             again.get(&phone).unwrap().push.as_deref(),
             Some("https://ntfy.sh/up1")
         );
+        let mut again = again;
         assert_eq!(again.all().len(), 1);
         assert_eq!(again.get(&phone).unwrap().name.len(), MAX_NAME);
         assert!(again.get(&SecretKey::generate().public()).is_none());
+        assert!(again.remove(&phone.to_string()).unwrap());
+        assert!(!again.remove(&phone.to_string()).unwrap());
+        assert!(Peers::load(&dir).unwrap().all().is_empty());
 
         let hub = Hub {
             id: phone.to_string(),

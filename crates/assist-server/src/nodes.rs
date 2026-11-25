@@ -79,18 +79,22 @@ async fn handle(state: AppState, connection: Connection) {
                     }
                 }
             });
+            let (outbox, queued) = mpsc::channel(READ_AHEAD);
+            let (token, kick) = nodes.devices.connect(&peer, outbox);
+            let credential = Credential::Node {
+                name: peer.name,
+                id: peer.id.clone(),
+            };
+            let link = connection.clone();
             let transport = Quic {
                 read,
                 send,
                 connection,
             };
-            let (outbox, queued) = mpsc::channel(READ_AHEAD);
-            let token = nodes.devices.connect(&peer, outbox);
-            let credential = Credential::Node {
-                name: peer.name,
-                id: peer.id.clone(),
-            };
-            conn::run(state.clone(), transport, credential, Some(queued)).await;
+            tokio::select! {
+                () = conn::run(state.clone(), transport, credential, Some(queued)) => {}
+                () = kick.cancelled() => link.close(0u32.into(), b"removed"),
+            }
             nodes.devices.disconnect(&peer.id, token);
         }
         None => {

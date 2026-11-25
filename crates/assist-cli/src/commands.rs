@@ -6,8 +6,8 @@ use std::process::ExitCode;
 
 use anyhow::{bail, Result};
 use assist_proto::rpc::{
-    self, AutopilotSet, Explain, Explanation, GoalStatus, JobRef, MemoryForget, MemoryRecord, Otp,
-    SecretEntry, SecretName, SecretSet,
+    self, AutopilotSet, Explain, Explanation, GoalStatus, JobRef, MemoryForget, MemoryRecord,
+    NodeEntry, NodeRef, Otp, SecretEntry, SecretName, SecretSet,
 };
 use assist_proto::{JobState, JobSummary, JobUpdate, Stream};
 
@@ -137,6 +137,85 @@ pub async fn autopilot(paths: &Paths, action: Option<&str>, goal: Option<String>
 }
 
 /// Lists memory records, or forgets one (`forget <id>`) or all (`forget all`).
+/// Lists the paired devices, or removes one by name or key (`remove <device>`).
+pub async fn nodes(paths: &Paths, action: Option<&str>, target: Option<&str>) -> Result<()> {
+    let mut client = Client::connect(paths.data(), false).await?;
+    let nodes: Vec<NodeEntry> = client.call(rpc::NODES_LIST, ()).await?;
+    match (action, target) {
+        (None, _) => {
+            if nodes.is_empty() {
+                println!("No paired devices. Pair a phone with: assist pair");
+            }
+            for node in &nodes {
+                println!("{}", node_line(node));
+            }
+        }
+        (Some("remove"), Some(target)) => {
+            let target = target.trim();
+            let found: Vec<&NodeEntry> = nodes
+                .iter()
+                .filter(|n| n.id == target || n.name.eq_ignore_ascii_case(target))
+                .collect();
+            let node = match found.as_slice() {
+                [node] => *node,
+                [] => bail!("no paired device is called {}", printable(target)),
+                _ => bail!(
+                    "several devices are called {}; give its key",
+                    printable(target)
+                ),
+            };
+            let name = printable(&node.name);
+            let answer = read_line(&format!(
+                "Unpair {name}? It must pair again to connect. [y/N] "
+            ))
+            .await?;
+            if !answer.trim().eq_ignore_ascii_case("y") {
+                println!("Kept.");
+                return Ok(());
+            }
+            let removed: bool = client
+                .call(
+                    rpc::NODES_REMOVE,
+                    NodeRef {
+                        id: node.id.clone(),
+                    },
+                )
+                .await?;
+            println!(
+                "{}",
+                if removed {
+                    format!("Unpaired {name}.")
+                } else {
+                    format!("{name} was not paired.")
+                }
+            );
+        }
+        _ => bail!("use: assist nodes [remove <device>]"),
+    }
+    Ok(())
+}
+
+/// One paired device for `assist nodes`.
+fn node_line(node: &NodeEntry) -> String {
+    let state = if node.connected { "connected" } else { "away" };
+    let mut line = format!("{:<20} {state}", printable(&node.name));
+    if node.push {
+        line.push_str(", can be woken");
+    }
+    if node.queued > 0 {
+        line.push_str(&format!(", {} waiting", node.queued));
+    }
+    if node.running > 0 {
+        line.push_str(&format!(", {} running", node.running));
+    }
+    line.push_str(&format!(
+        "\n    does: {}",
+        printable(&node.capabilities.join(", "))
+    ));
+    line.push_str(&format!("\n    key:  {}", node.id));
+    line
+}
+
 pub async fn memory(paths: &Paths, action: Option<&str>, target: Option<&str>) -> Result<()> {
     let mut client = Client::connect(paths.data(), false).await?;
     let records: Vec<MemoryRecord> = client.call(rpc::MEMORY_LIST, ()).await?;

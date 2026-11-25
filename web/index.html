@@ -20,6 +20,7 @@
     <button type="button" data-tab="commands">Commands</button>
     <button type="button" data-tab="settings">Settings</button>
     <button type="button" data-tab="audit">Audit</button>
+    <button type="button" data-tab="nodes">Nodes</button>
     <button type="button" data-tab="clients">Clients</button>
   </nav>
   <span id="status" role="status">Connecting</span>
@@ -124,6 +125,14 @@
     </table>
   </section>
 
+  <section id="nodes" hidden>
+    <p>Paired devices. Requests for one that is away wait up to 10 minutes; one that can be woken gets a push. Pair another with <code>assist pair</code>.</p>
+    <p><button type="button" id="nodes-refresh">Refresh</button></p>
+    <table>
+      <thead><tr><th>Device</th><th>State</th><th>Requests</th><th>Can do</th><th>Paired</th><th>Last seen</th><th></th></tr></thead>
+      <tbody id="nodes-body"></tbody>
+    </table>
+  </section>
   <section id="clients" hidden>
     <p><button type="button" id="clients-refresh">Refresh</button></p>
     <table>

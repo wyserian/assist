@@ -197,6 +197,7 @@ function refresh(tab) {
     commands: loadMisses,
     settings: loadSettings,
     audit: loadAudit,
+    nodes: loadNodes,
     clients: loadClients,
   };
   if (views[tab]) views[tab]().catch((err) => setStatus(err.message));
@@ -505,6 +506,33 @@ async function loadAudit() {
 }
 
 $("audit-refresh").addEventListener("click", () => refresh("audit"));
+
+// --- nodes ---
+
+async function loadNodes() {
+  const nodes = await rpc("nodes.list");
+  const body = $("nodes-body");
+  body.replaceChildren();
+  for (const node of nodes) {
+    const state = node.connected ? "connected" : node.push ? "away, can be woken" : "away";
+    const requests = [];
+    if (node.running) requests.push(`${node.running} running`);
+    if (node.queued) requests.push(`${node.queued} waiting`);
+    const remove = button("Remove", async () => {
+      if (!confirm(`Unpair ${node.name}? It must pair again to connect.`)) return;
+      try {
+        await rpc("nodes.remove", { id: node.id });
+      } catch (err) {
+        setStatus(err.message);
+      }
+      loadNodes();
+    }, "danger");
+    body.append(row([node.name, state, requests.join(", "), node.capabilities.join(", "), time(node.added), node.connected ? "now" : time(node.seen), remove]));
+  }
+  if (!nodes.length) body.append(row(["No paired devices."]));
+}
+
+$("nodes-refresh").addEventListener("click", () => refresh("nodes"));
 
 // --- clients ---
 

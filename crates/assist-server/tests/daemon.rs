@@ -1014,3 +1014,42 @@ async fn job_output(ws: &mut Ws, job: u64) -> String {
         }
     }
 }
+
+#[tokio::test]
+async fn the_nodes_list_shows_devices_and_removing_one_disconnects_it() {
+    let daemon = start("nodes").await;
+    let mut cli = connect(daemon.port, &bearer(&daemon)).await.unwrap();
+    let phone = local_endpoint().await;
+    pair_device(&mut cli, &phone, &daemon.hub, "Phone", &["call"]).await;
+
+    let nodes: Vec<rpc::NodeEntry> = call(&mut cli, rpc::NODES_LIST, ()).await;
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(
+        (nodes[0].name.as_str(), nodes[0].connected),
+        ("Phone", false)
+    );
+
+    let (_to_hub, mut from_hub, _) = device_says(&phone, &daemon.hub, phone_hello(&[])).await;
+    let nodes: Vec<rpc::NodeEntry> = call(&mut cli, rpc::NODES_LIST, ()).await;
+    assert!(nodes[0].connected, "{nodes:?}");
+    assert!(nodes[0].seen.is_some());
+
+    let node = rpc::NodeRef {
+        id: nodes[0].id.clone(),
+    };
+    let removed: bool = call(&mut cli, rpc::NODES_REMOVE, &node).await;
+    assert!(removed);
+    let closed = tokio::time::timeout(
+        Duration::from_secs(10),
+        assist_net::recv_frame(&mut from_hub),
+    )
+    .await
+    .expect("the hub kept the removed device connected");
+    assert!(!matches!(closed, Ok(Some(_))), "{closed:?}");
+    let nodes: Vec<rpc::NodeEntry> = call(&mut cli, rpc::NODES_LIST, ()).await;
+    assert!(nodes.is_empty(), "{nodes:?}");
+    assert!(assist_net::Peers::load(&daemon.dir)
+        .unwrap()
+        .all()
+        .is_empty());
+}

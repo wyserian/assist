@@ -107,15 +107,28 @@ assistant as its owner, with `owner_remote` trust: for example `run backup` or
 `open firefox` on the computer. Replies and job output show in the phone's chat. Switch it
 off to talk to the phone itself. Wake-word requests always stay on the phone.
 
+## Seeing your devices
+
+```sh
+assist nodes
+```
+
+```text
+CPH2569              connected, can be woken
+    does: call, send_sms, set_volume, lock, open_app, screenshot, ocr, record
+    key:  9f2c...
+```
+
+The dashboard's **Nodes** tab shows the same: each device's state (connected, away, or away
+but can be woken), requests running on it or waiting for it, what it can do, when it was
+paired and when it was last seen.
+
 ## Removing a device
 
-Pairing state lives in files:
+```sh
+assist nodes remove CPH2569      # by name or key; asks first
+```
 
-- Computer: remove the device's entry from `peers.json` in the data directory and restart
-  `assist serve`.
-- Phone: clear the app's storage, or reinstall it.
-
-## Coming next
-
-The Nodes tab in the dashboard (devices, capabilities, last seen, queued requests), a
-Telegram bot, MQTT discovery for Home Assistant and incoming webhooks.
+Or **Remove** in the Nodes tab. The device is unpaired at once and its connection dropped;
+requests waiting for it fail. To use it again it must pair again with `assist pair`. On the
+phone, clear the app's storage (or reinstall it) to forget the computer as well.

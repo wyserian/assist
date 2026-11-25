@@ -373,6 +373,42 @@ pub struct Explanation {
     pub decision: String,
 }
 
+/// [`NodeEntry`] list: the paired devices. Params: none.
+pub const NODES_LIST: &str = "nodes.list";
+/// Unpairs a device and drops its connection (local clients only). Params: [`NodeRef`];
+/// result: whether it was paired.
+pub const NODES_REMOVE: &str = "nodes.remove";
+
+/// A paired device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeEntry {
+    /// Its key.
+    pub id: String,
+    /// Its name, e.g. `Pixel 5`.
+    pub name: String,
+    /// Commands it runs for the hub.
+    pub capabilities: Vec<String>,
+    /// When it was paired, Unix ms.
+    pub added: u64,
+    /// Connected now.
+    pub connected: bool,
+    /// When it last connected or disconnected, Unix ms; none since the daemon started.
+    pub seen: Option<u64>,
+    /// It gave a push address, so the hub can wake it.
+    pub push: bool,
+    /// Requests waiting for it to connect.
+    pub queued: usize,
+    /// Requests it is running now.
+    pub running: usize,
+}
+
+/// A paired device's key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeRef {
+    /// Its key.
+    pub id: String,
+}
+
 /// A connected client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientEntry {
