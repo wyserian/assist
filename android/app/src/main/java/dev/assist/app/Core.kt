@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.assist_ffi.AssistException
 import uniffi.assist_ffi.Assistant
+import uniffi.assist_ffi.Feature
 import uniffi.assist_ffi.Job
 import uniffi.assist_ffi.Listener
 import uniffi.assist_ffi.ModelFile
@@ -68,7 +69,7 @@ class Core(private val app: Application) {
         private set
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val phone = AndroidPhone(app) { permissions.trySend(it) }
+    private val phone = AndroidPhone(app, ask = { permissions.trySend(it) }, offer = ::offerModels)
     private val speech = TextToSpeech(app) {}
     private var assistant: Assistant? = null
     private var listener: Listener? = null
@@ -130,7 +131,7 @@ class Core(private val app: Application) {
     /** Push-to-talk: starts listening for one request, or stops if it is listening. */
     fun talk() {
         recording?.let { it.cancel(); return }
-        if (downloading || !ready(handsFree = false, ::talk)) return
+        if (downloading || !ready(Feature.TALK, ::talk)) return
         speech.stop()
         recording = scope.launch {
             listening = true
@@ -157,7 +158,7 @@ class Core(private val app: Application) {
             app.stopService(Intent(app, HandsFreeService::class.java))
             return
         }
-        if (downloading || !ready(handsFree = true, ::toggleHandsFree)) return
+        if (downloading || !ready(Feature.HANDS_FREE, ::toggleHandsFree)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !granted(NOTIFICATIONS)) {
             // The service runs without it, but its notification is the way to stop it.
             permissions.trySend(NOTIFICATIONS)
@@ -171,6 +172,11 @@ class Core(private val app: Application) {
         error?.let { show(false, it) }
     }
 
+    /** Offers the models [feature] still needs; called from the core's threads. */
+    private fun offerModels(feature: Feature) {
+        scope.launch { if (!downloading) offer = missingModels(dataDir(), feature) }
+    }
+
     /** The user's answer to the model download offer. */
     fun answerOffer(accepted: Boolean) {
         val models = offer
@@ -178,10 +184,10 @@ class Core(private val app: Application) {
         if (!accepted) return
         downloading = true
         scope.launch {
-            show(false, "Downloading the voice models (${models.sumOf { it.sizeMb.toInt() }} MB).")
+            show(false, "Downloading the models (${models.sumOf { it.sizeMb.toInt() }} MB).")
             try {
                 withContext(Dispatchers.IO) { models.forEach { download(it, app.filesDir, app.cacheDir) } }
-                show(false, "Voice is ready.")
+                show(false, "Done. Ask again.")
             } catch (e: IOException) {
                 show(false, "Download failed: ${e.message}")
             } catch (e: AssistException) {
@@ -193,13 +199,13 @@ class Core(private val app: Application) {
     }
 
     /** Whether voice can start: asks for the microphone (then runs [retry]) or offers the missing models if not. */
-    private fun ready(handsFree: Boolean, retry: () -> Unit): Boolean {
+    private fun ready(feature: Feature, retry: () -> Unit): Boolean {
         if (!granted(MIC)) {
             afterMic = retry
             permissions.trySend(MIC)
             return false
         }
-        val missing = missingModels(dataDir(), handsFree)
+        val missing = missingModels(dataDir(), feature)
         if (missing.isNotEmpty()) {
             offer = missing
             return false

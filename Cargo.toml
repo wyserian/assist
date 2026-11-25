@@ -28,6 +28,10 @@ insta = "1"
 jiff = "1"
 keyring = "4"
 notify = "9"
+# OCR on the phone (assist-actions feature `ocr`): pure Rust, models downloaded with consent.
+ocrs = "0.14"
+rten = "0.28"
+image = { version = "0.25", default-features = false, features = ["png"] }
 notify-rust = "4.19"
 open = "5"
 process-wrap = { version = "11", default-features = false }

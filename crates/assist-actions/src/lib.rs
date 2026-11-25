@@ -15,6 +15,8 @@ pub mod facts;
 pub mod memory;
 #[cfg(feature = "mute")]
 pub mod mute;
+#[cfg(feature = "ocr")]
+pub mod ocr;
 #[cfg(feature = "shell")]
 mod process;
 #[cfg(feature = "processes")]

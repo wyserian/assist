@@ -19,3 +19,7 @@ phrases = [
     "(read|scan) (the)? (text on)? (the)? screen",
     "what does the screen say",
 ]
+
+[lock]
+reply = "Locking."
+phrases = ["lock (the|my)? (phone|screen|device)"]

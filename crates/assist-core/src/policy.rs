@@ -77,7 +77,7 @@ pub enum Capability {
     /// Open or close apps.
     #[serde(rename = "apps")]
     Apps,
-    /// Media keys, volume.
+    /// Media keys, volume, locking the screen: device controls that change nothing lasting.
     #[serde(rename = "media")]
     Media,
     /// Run shell commands or scripts.

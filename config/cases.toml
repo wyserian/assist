@@ -217,3 +217,7 @@ text = "okay so"
 
 [[case]]
 text = "open banana"
+
+[[case]]
+text = "lock the phone"
+command = "lock"

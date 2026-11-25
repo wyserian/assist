@@ -4,6 +4,7 @@
 //! word, and shows the answer; jobs run on the core's own tokio runtime. Phone actions call
 //! back into the app through [`phone::Phone`].
 
+pub mod models;
 pub mod phone;
 pub mod voice;
 
@@ -300,6 +301,21 @@ mod tests {
                 reason: "Volume is not allowed.".to_owned(),
             })
         }
+        fn lock(&self) -> Result<(), PhoneError> {
+            self.log("lock".to_owned())
+        }
+        fn screenshot(&self, name: String) -> Result<String, PhoneError> {
+            self.log(format!("screenshot {name}"))?;
+            Ok(format!("Pictures/Assist/{name}"))
+        }
+        fn capture(&self) -> Result<String, PhoneError> {
+            Err(PhoneError::Failed {
+                reason: "no screen in tests".to_owned(),
+            })
+        }
+        fn offer_models(&self, feature: models::Feature) -> Result<(), PhoneError> {
+            self.log(format!("offer {feature:?}"))
+        }
     }
 
     /// An assistant in a fresh data directory; remove it with [`finish`].
@@ -397,6 +413,33 @@ mod tests {
         let out = wait(&assistant, volume.jobs[0].id);
         assert_eq!(out.state, "failed");
         assert_eq!(out.lines, ["Volume is not allowed."]);
+        finish(assistant, dir);
+    }
+
+    #[test]
+    fn locks_takes_screenshots_and_offers_the_ocr_models() {
+        let phone = Arc::new(FakePhone::default());
+        let (assistant, dir) = start("screen", Arc::clone(&phone));
+        let lock = assistant.say("lock the phone".to_owned());
+        wait(&assistant, lock.jobs[0].id);
+        let shot = assistant.say("take a screenshot".to_owned());
+        let saved = wait(&assistant, shot.jobs[0].id);
+        assert_eq!(saved.lines.len(), 1, "{saved:?}");
+        assert!(
+            saved.lines[0].starts_with("Pictures/Assist/assist-"),
+            "{saved:?}"
+        );
+        let read = assistant.say("read the screen".to_owned());
+        let refused = wait(&assistant, read.jobs[0].id);
+        assert_eq!(refused.state, "failed");
+        assert!(
+            refused.lines[0].contains("text reading models"),
+            "{refused:?}"
+        );
+        let log = phone.0.lock().unwrap().clone();
+        assert_eq!(log[0], "lock");
+        assert!(log[1].starts_with("screenshot assist-"));
+        assert_eq!(log[2], "offer Ocr");
         finish(assistant, dir);
     }
 

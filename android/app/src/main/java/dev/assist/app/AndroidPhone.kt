@@ -3,23 +3,34 @@ package dev.assist.app
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
+import android.provider.MediaStore
+import android.provider.Settings
 import android.telephony.SmsManager
 import uniffi.assist_ffi.App
 import uniffi.assist_ffi.Contact
+import uniffi.assist_ffi.Feature
 import uniffi.assist_ffi.Phone
 import uniffi.assist_ffi.PhoneException
+import java.io.File
 import kotlin.math.roundToInt
 
 /**
  * What the core asks the phone to do. Policy and confirmation already happened in the core;
- * this only checks the Android permission, asking for it through [ask] when it is missing.
+ * this only checks the Android permission, asking for it through [ask] when it is missing,
+ * and shows the model download offer through [offer].
  */
-class AndroidPhone(private val context: Context, private val ask: (String) -> Unit) : Phone {
+class AndroidPhone(
+    private val context: Context,
+    private val ask: (String) -> Unit,
+    private val offer: (Feature) -> Unit,
+) : Phone {
     override fun openApp(packageName: String) {
         val intent = context.packageManager.getLaunchIntentForPackage(packageName)
             ?: throw PhoneException.Failed("That app is no longer installed.")
@@ -50,12 +61,52 @@ class AndroidPhone(private val context: Context, private val ask: (String) -> Un
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, level, AudioManager.FLAG_SHOW_UI)
     }
 
+    override fun lock() {
+        if (!accessibility().lock()) throw PhoneException.Failed("Android did not lock the screen.")
+    }
+
+    override fun screenshot(name: String): String {
+        val picture = shot()
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(MediaStore.Images.Media.RELATIVE_PATH, GALLERY)
+        }
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: throw PhoneException.Failed("The gallery did not take the screenshot.")
+        resolver.openOutputStream(uri)?.use { picture.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            ?: throw PhoneException.Failed("The gallery did not take the screenshot.")
+        return "$GALLERY/$name"
+    }
+
+    override fun capture(): String {
+        val file = File(context.cacheDir, "screen-${System.nanoTime()}.png")
+        file.outputStream().use { shot().compress(Bitmap.CompressFormat.PNG, 100, it) }
+        return file.absolutePath
+    }
+
+    override fun offerModels(feature: Feature) = offer(feature)
+
+    private fun shot(): Bitmap = accessibility().capture().getOrElse {
+        throw PhoneException.Failed(it.message ?: "No screenshot.")
+    }
+
+    /** The accessibility service; opens its settings and fails if the user has not turned it on. */
+    private fun accessibility(): AssistAccessibility = AssistAccessibility.current ?: run {
+        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        throw PhoneException.Failed("Turn on Assist in Accessibility settings, then ask again.")
+    }
+
     private fun need(permission: String, what: String) {
         if (context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) return
         ask(permission)
         throw PhoneException.Failed("Allow $what for Assist, then ask again.")
     }
 }
+
+/** Where screenshots go: the gallery's Pictures folder. */
+private const val GALLERY = "Pictures/Assist"
 
 /** The phone's contacts and launcher apps, for the core to match names against. */
 object PhoneLists {

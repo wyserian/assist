@@ -9,7 +9,7 @@ mod attention;
 #[cfg(not(target_os = "android"))]
 mod capture;
 mod file;
-mod models;
+pub mod models;
 mod segment;
 #[cfg(all(unix, not(target_os = "android")))]
 #[path = "speak_unix.rs"]
@@ -28,7 +28,7 @@ pub use attention::{Attention, Heard, AWAKE};
 #[cfg(not(target_os = "android"))]
 pub use capture::{input_devices, Mic};
 pub use file::{read_wav, transcribe, MAX_FILE_SECONDS};
-pub use models::{missing, Model, MODELS};
+pub use models::MODELS;
 pub use segment::{Event, Segmenter, PRE_ROLL};
 #[cfg(not(target_os = "android"))]
 pub use speak::Speaker;

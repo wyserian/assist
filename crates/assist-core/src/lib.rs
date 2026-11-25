@@ -13,6 +13,7 @@ pub mod dialog;
 pub mod facts;
 pub mod matcher;
 pub mod memory;
+pub mod models;
 pub mod normalize;
 pub mod phrase;
 pub mod phrases;

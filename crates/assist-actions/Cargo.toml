@@ -25,12 +25,17 @@ processes = ["dep:sysinfo", "dep:windows"]
 mute = ["dep:tokio"]
 memory = ["dep:tokio"]
 autopilot = ["dep:tokio"]
+# Off by default: the phone reads text with ocrs; the Windows desktop uses its own OCR.
+ocr = ["dep:ocrs", "dep:rten", "dep:image"]
 
 [dependencies]
 assist-core.workspace = true
 assist-voice = { workspace = true, optional = true }
 open = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
+ocrs = { workspace = true, optional = true }
+rten = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
 directories.workspace = true
 sysinfo = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

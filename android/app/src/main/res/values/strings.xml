@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_description">Lets Assist lock the screen and take a screenshot when you ask, for example to read the text on it. It reads nothing on its own.</string>
+</resources>

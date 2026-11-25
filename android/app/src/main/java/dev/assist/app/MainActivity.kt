@@ -131,8 +131,8 @@ private fun Chat(model: Core) {
         val files = model.offer.joinToString("\n") { "${it.name}: ${it.sizeMb} MB, licence ${it.licence}" }
         AlertDialog(
             onDismissRequest = { model.answerOffer(false) },
-            title = { Text("Download voice models?") },
-            text = { Text("Speech is recognized on this phone. It needs, from the sherpa-onnx releases on GitHub:\n\n$files") },
+            title = { Text("Download models?") },
+            text = { Text("Assist does this on the phone, offline, with these models:\n\n$files") },
             confirmButton = { TextButton(onClick = { model.answerOffer(true) }) { Text("Download") } },
             dismissButton = { TextButton(onClick = { model.answerOffer(false) }) { Text("Not now") } },
         )

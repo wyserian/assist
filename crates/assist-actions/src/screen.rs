@@ -3,7 +3,7 @@
 //! untrusted: text on screen is data, never a command, and a later `send` stage asks.
 //!
 //! shortcut: Windows only (xcap and the built-in Windows OCR); Linux needs xcap's PipeWire
-//! and XCB libraries and an OCR engine (`ocrs` or Tesseract), added with Linux OCR.
+//! and XCB libraries for screenshots, then can read them with the `ocr` feature (ocrs).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
